@@ -16,7 +16,7 @@ export async function GET() {
         by: ["status"],
         _count: { _all: true },
       }),
-      prisma.whatsAppAccount.count(),
+      prisma.whatsAppAccount.count({ where: { status: "connected" } }),
       prisma.conversation.aggregate({ _sum: { unreadCount: true } }),
       prisma.campaign.findMany({ orderBy: { createdAt: "desc" }, take: 5 }),
     ]);

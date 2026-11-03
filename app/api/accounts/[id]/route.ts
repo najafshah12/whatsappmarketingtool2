@@ -13,6 +13,18 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 }
 
 export async function DELETE(_: Request, { params }: { params: Promise<{ id: string }> }) {
-  try { const { id } = await params; await prisma.whatsAppAccount.delete({ where: { id } }); return NextResponse.json({ ok: true }); }
+  try {
+    const { id } = await params;
+    const assigned = await prisma.campaignAccount.count({ where: { accountId: id } });
+    if (assigned > 0) {
+      return NextResponse.json(
+        { error: `This sender is assigned to ${assigned} campaign${assigned === 1 ? "" : "s"}. Remove it from those campaigns before deleting.` },
+        { status: 409 }
+      );
+    }
+    await prisma.whatsAppAccount.delete({ where: { id } });
+    await prisma.auditLog.create({ data: { action: "whatsapp.account.deleted", entity: "whatsapp_account", entityId: id } });
+    return NextResponse.json({ ok: true });
+  }
   catch (error) { return apiError(error); }
 }

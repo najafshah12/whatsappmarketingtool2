@@ -2,14 +2,75 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { apiError } from "@/lib/api";
-const schema = z.object({ name:z.string().trim().min(1).max(100), phone:z.string().trim().regex(/^\+?[1-9]\d{7,14}$/, "Enter a valid international phone number"), email:z.string().email().optional().or(z.literal("")), groupName:z.string().max(100).optional(), tags:z.array(z.string().max(40)).max(20).optional(), marketingOptIn:z.boolean().default(false) });
-export async function GET(req: Request) { try { const url = new URL(req.url); const q=url.searchParams.get("q")??""; const contacts=await prisma.contact.findMany({where:q?{OR:[{name:{contains:q,mode:"insensitive"}},{phone:{contains:q}},{email:{contains:q,mode:"insensitive"}}]}:{},orderBy:{createdAt:"desc"},take:500}); return NextResponse.json(contacts); } catch(e){return apiError(e);} }
+import { normalizePhone } from "@/lib/phone";
+
+const schema = z.object({
+  name: z.string().trim().min(1).max(100),
+  phone: z.string().trim().min(1).max(32),
+  email: z.string().email().optional().or(z.literal("")),
+  groupName: z.string().max(100).optional(),
+  tags: z.array(z.string().max(40)).max(20).optional(),
+  marketingOptIn: z.boolean().default(false),
+});
+
+export async function GET(req: Request) {
+  try {
+    const url = new URL(req.url);
+    const q = url.searchParams.get("q") ?? "";
+    const contacts = await prisma.contact.findMany({
+      where: q
+        ? {
+            OR: [
+              { name: { contains: q, mode: "insensitive" } },
+              { phone: { contains: q } },
+              { email: { contains: q, mode: "insensitive" } },
+            ],
+          }
+        : {},
+      orderBy: { createdAt: "desc" },
+      take: 500,
+    });
+    return NextResponse.json(contacts);
+  } catch (error) {
+    return apiError(error);
+  }
+}
+
 export async function POST(req: Request) {
   try {
-    const body=schema.parse(await req.json());
+    const body = schema.parse(await req.json());
+    const phone = normalizePhone(body.phone);
+    if (!phone) {
+      return NextResponse.json(
+        { error: "Enter a valid international phone number, for example +14155550123." },
+        { status: 400 }
+      );
+    }
+
+    const existing = await prisma.contact.findUnique({ where: { phone }, select: { id: true } });
+    if (existing) {
+      return NextResponse.json({ error: `${phone} is already saved as a contact.` }, { status: 409 });
+    }
+
     const optIn = body.marketingOptIn;
-    const contact=await prisma.contact.create({data:{...body,email:body.email||null,marketingOptIn:optIn,marketingOptInAt:optIn?new Date():null,marketingOptInSource:optIn?"admin-confirmed-entry":null}});
-    await prisma.auditLog.create({data:{action:"contact.created",entity:"contact",entityId:contact.id,detail:{marketingOptIn:optIn}}});
-    return NextResponse.json(contact,{status:201});
-  } catch(e){ if(e instanceof z.ZodError) return NextResponse.json({error:e.issues[0]?.message??"Invalid contact"},{status:400}); return apiError(e); }
+    const contact = await prisma.contact.create({
+      data: {
+        ...body,
+        phone,
+        email: body.email || null,
+        marketingOptIn: optIn,
+        marketingOptInAt: optIn ? new Date() : null,
+        marketingOptInSource: optIn ? "admin-confirmed-entry" : null,
+      },
+    });
+    await prisma.auditLog.create({
+      data: { action: "contact.created", entity: "contact", entityId: contact.id, detail: { marketingOptIn: optIn } },
+    });
+    return NextResponse.json(contact, { status: 201 });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return NextResponse.json({ error: error.issues[0]?.message ?? "Invalid contact" }, { status: 400 });
+    }
+    return apiError(error);
+  }
 }

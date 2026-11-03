@@ -23,6 +23,8 @@ try {
       const contacts = [];
       for (let i = 0; i < names.length; i += 1) {
         const phone = `+12025550${String(100 + i).padStart(2, "0")}`;
+        const optedOut = i === 22 || i === 23;
+        const marketingOptIn = !optedOut;
         contacts.push(await tx.contact.upsert({
           where: { phone },
           create: {
@@ -31,10 +33,18 @@ try {
             email: `demo${String(i + 1).padStart(2, "0")}@example.test`,
             groupName: i < 10 ? groupNames[0] : i < 20 ? groupNames[1] : groupNames[2],
             tags: ["demo", i % 2 ? "lead" : "customer"],
-            optedOut: i === 22 || i === 23,
+            optedOut,
+            marketingOptIn,
+            marketingOptInAt: marketingOptIn ? now : null,
+            marketingOptInSource: marketingOptIn ? "demo-seed" : null,
             createdAt: daysAgo(24 - i),
           },
-          update: {},
+          update: {
+            optedOut,
+            marketingOptIn,
+            marketingOptInAt: marketingOptIn ? now : null,
+            marketingOptInSource: marketingOptIn ? "demo-seed" : null,
+          },
         }));
       }
 

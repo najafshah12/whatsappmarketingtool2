@@ -37,7 +37,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     if (!providerId) throw new Error("Meta accepted the reply without returning a message ID.");
     const sentAt = new Date();
     const message = await prisma.conversationMessage.create({ data: { conversationId: id, direction: "outbound", body, providerId, status: "sent", sentAt } });
-    await prisma.conversation.update({ where: { id }, data: { lastMessageAt: sentAt } });
+    await prisma.conversation.update({ where: { id }, data: { lastMessageAt: sentAt, unreadCount: 0, status: "open" } });
     await prisma.auditLog.create({ data: { action: "inbox.reply_sent", entity: "conversation", entityId: id, detail: { providerId } } });
     return NextResponse.json(message, { status: 201 });
   } catch (error) {

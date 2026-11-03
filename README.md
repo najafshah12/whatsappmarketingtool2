@@ -48,11 +48,27 @@ Meta app review, business verification, permissions, template approval, and send
 
 ## Contacts CSV
 
-Required columns: `name,phone`. Optional columns: `email,groupName,tags,marketingOptIn,optedOut`. Phones must use international format, e.g. `+14155550123`. Mark consent with `true` or `yes` only when permission was recorded; tags use `|` between values. Duplicate phone numbers are skipped. Opt-out always overrides opt-in.
+Required columns: `name,phone`. Optional columns: `email,groupName,tags,marketingOptIn,optedOut`. Phones must use international format, e.g. `+14155550123`; numbers without a `+` are stored in the same canonical form. Tag values are separated with `|`. Duplicate phone numbers are skipped (including duplicates inside the same file), and rows with an invalid number are reported by CSV row number. Opt-out always overrides opt-in.
+
+## Health check
+
+`GET /api/health` is a public, secret-free probe for uptime monitors and deployment checks. It verifies the database connection and reports whether Meta credentials, the scheduled sender secret, and token encryption are configured. It returns HTTP 200 when healthy and HTTP 503 when the database is unreachable.
+
+## Local database helper (Windows)
+
+If PostgreSQL is installed locally but you do not want to change the system instance, this repository can use a separate cluster on port 5433:
+
+1. `initdb -D "$env:LOCALAPPDATA\reachpulse-pg\data" -U postgres -A trust -E UTF8 --locale=C`
+2. `powershell -ExecutionPolicy Bypass -File scripts/local-db.ps1 start`
+3. Point `DATABASE_URL` and `DATABASE_URL_UNPOOLED` at `postgresql://postgres@127.0.0.1:5433/wa_studio?schema=public`.
+4. Create the database once: `createdb -U postgres -h 127.0.0.1 -p 5433 wa_studio`.
+
+Use `scripts/local-db.ps1 stop` and `scripts/local-db.ps1 status` to manage it. The cluster does not start automatically after a reboot.
+
 
 ## Scheduled campaigns
 
-The protected endpoint is `GET /api/cron/campaigns`; set a private `CRON_SECRET` of at least 32 characters in the Production environment and redeploy. Vercel sends it as `Authorization: Bearer <CRON_SECRET>`. Without this variable, the cron endpoint stays locked and scheduled sends do not run. This project is on Vercel Hobby, so `vercel.json` schedules the sender once daily at 00:00 UTC and campaigns may be delayed by up to a day. Use the manual **Send next batch** action for immediate progress. More frequent schedules require a Vercel plan that supports a higher cron frequency or an external scheduler calling this protected endpoint.
+The protected endpoint is `GET /api/cron/campaigns`; set a private `CRON_SECRET` of at least 32 characters in the Production environment and redeploy. Vercel sends it as `Authorization: Bearer <CRON_SECRET>`. Without this variable, the cron endpoint stays locked and scheduled sends do not run. This project is on Vercel Hobby, so `vercel.json` schedules the sender once daily at 00:00 UTC and campaigns may be delayed by up to a day. Use the manual **Send next batch** action for immediate progress. More frequent schedules require a Vercel plan that supports a higher cron frequency or an external scheduler calling this protected endpoint. Each invocation sends in batches of 10 and keeps draining due campaigns for up to 50 seconds, so one run can clear several batches instead of a single one. Any external scheduler (for example GitHub Actions, cron-job.org, or Zapier) can call the endpoint with the same `Authorization: Bearer <CRON_SECRET>` header.
 
 ## Admin login and deployment
 

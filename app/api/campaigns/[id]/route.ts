@@ -11,8 +11,14 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     const input = schema.parse(await req.json());
     const campaign = await prisma.campaign.findUniqueOrThrow({ where: { id }, include: { template: true, accountAssignments: { include: { account: true } } } });
     if (input.status === "scheduled") {
-      const schedule = input.scheduledAt ? new Date(input.scheduledAt) : campaign.scheduledAt;
-      if (!schedule || schedule <= new Date()) return NextResponse.json({ error: "Choose a future send time." }, { status: 400 });
+      if (input.scheduledAt && new Date(input.scheduledAt) <= new Date()) {
+        return NextResponse.json({ error: "Choose a future send time." }, { status: 400 });
+      }
+      const schedule = input.scheduledAt
+        ? new Date(input.scheduledAt)
+        : campaign.scheduledAt && campaign.scheduledAt > new Date()
+          ? campaign.scheduledAt
+          : new Date(); // Resuming a paused campaign that was due makes it run on the next scheduler pass.
       if (!campaign.template || campaign.template.status !== "approved") return NextResponse.json({ error: "A Meta-approved template is required to schedule sending." }, { status: 409 });
       const senderReady = campaign.accountAssignments.some(({ account }) => account.status === "connected" && account.accessTokenEncrypted && account.phoneNumberId && account.id === campaign.template?.accountId);
       if (!senderReady) return NextResponse.json({ error: "Assign the connected sender that owns the approved template." }, { status: 409 });
