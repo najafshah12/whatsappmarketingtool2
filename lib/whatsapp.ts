@@ -82,3 +82,109 @@ export async function sendCloudMessage<T>(account: Pick<WhatsAppAccount, "access
 export function metaWebhookSecret() {
   return process.env.WA_APP_SECRET?.trim() || process.env.META_APP_SECRET?.trim() || "";
 }
+
+/**
+ * Exchanges a short-lived Meta user access token for a 60-day long-lived access token.
+ * If the token is already a permanent system user token or page token, or if META_APP_SECRET is unset,
+ * returns the original token.
+ */
+export async function exchangeForLongLivedToken(token: string): Promise<{ accessToken: string; expiresIn: number | null; isLongLived: boolean }> {
+  const { appId, appSecret, graphVersion: version } = getMetaAppConfig();
+  if (!appId || !appSecret) {
+    console.warn("META_APP_ID or META_APP_SECRET not configured. Skipping 60-day token exchange.");
+    return { accessToken: token, expiresIn: null, isLongLived: false };
+  }
+
+  try {
+    const url = new URL(`https://graph.facebook.com/${version}/oauth/access_token`);
+    url.searchParams.set("grant_type", "fb_exchange_token");
+    url.searchParams.set("client_id", appId);
+    url.searchParams.set("client_secret", appSecret);
+    url.searchParams.set("fb_exchange_token", token);
+
+    const res = await fetch(url, { cache: "no-store" });
+    const data = await res.json() as { access_token?: string; expires_in?: number; error?: GraphError };
+
+    if (res.ok && data.access_token) {
+      // 60 days in seconds is 5,184,000
+      return {
+        accessToken: data.access_token,
+        expiresIn: data.expires_in ?? 5184000,
+        isLongLived: true,
+      };
+    }
+
+    console.warn("Meta long-lived token exchange notice:", data.error?.message || "Using provided token directly.");
+  } catch (err) {
+    console.warn("Error during token exchange request:", err instanceof Error ? err.message : err);
+  }
+
+  return { accessToken: token, expiresIn: null, isLongLived: false };
+}
+
+/**
+ * Inspects a Meta token using the debug_token endpoint.
+ * Detects whether token is valid, expiration date, and whether it's a permanent System User token.
+ */
+export async function inspectToken(token: string): Promise<{
+  isValid: boolean;
+  type?: string;
+  expiresAt: Date | null;
+  isPermanent: boolean;
+  scopes?: string[];
+  errorMessage?: string;
+}> {
+  const { appId, appSecret, graphVersion: version } = getMetaAppConfig();
+  if (!appId || !appSecret) {
+    return { isValid: true, expiresAt: null, isPermanent: false };
+  }
+
+  try {
+    const appToken = `${appId}|${appSecret}`;
+    const url = new URL(`https://graph.facebook.com/${version}/debug_token`);
+    url.searchParams.set("input_token", token);
+    url.searchParams.set("access_token", appToken);
+
+    const res = await fetch(url, { cache: "no-store" });
+    const data = await res.json() as {
+      data?: {
+        is_valid?: boolean;
+        type?: string;
+        expires_at?: number;
+        data_access_expires_at?: number;
+        scopes?: string[];
+        error?: { message?: string };
+      };
+    };
+
+    if (data.data) {
+      const d = data.data;
+      const isValid = Boolean(d.is_valid);
+      const isPermanent = d.expires_at === 0 || d.type === "SYSTEM_USER";
+      const expiresAt = isPermanent || !d.expires_at ? null : new Date(d.expires_at * 1000);
+      return {
+        isValid,
+        type: d.type,
+        expiresAt,
+        isPermanent,
+        scopes: d.scopes,
+        errorMessage: d.error?.message,
+      };
+    }
+  } catch (err) {
+    console.warn("debug_token check failed:", err instanceof Error ? err.message : err);
+  }
+
+  return { isValid: true, expiresAt: null, isPermanent: false };
+}
+
+/**
+ * Verifies that the given access token has access to the specified WhatsApp Phone Number ID.
+ */
+export async function verifyWhatsAppPhoneNumber(accessToken: string, phoneNumberId: string) {
+  return graphRequest<{ id: string; display_phone_number?: string; verified_name?: string; quality_rating?: string }>(
+    accessToken,
+    `${encodeURIComponent(phoneNumberId)}?fields=id,display_phone_number,verified_name,quality_rating`
+  );
+}
+

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { encryptAccessToken, getMetaAppConfig, graphRequest, WhatsAppApiError } from "@/lib/whatsapp";
+import { encryptAccessToken, exchangeForLongLivedToken, getMetaAppConfig, graphRequest, inspectToken, WhatsAppApiError } from "@/lib/whatsapp";
 
 const schema = z.object({
   code: z.string().trim().min(10).max(4096),
@@ -32,15 +32,35 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: exchange.error?.message || "Meta could not exchange the signup code. Restart the signup flow and try again." }, { status: 400 });
     }
 
-    const accessToken = exchange.access_token;
-    const phone = await graphRequest<PhoneDetails>(accessToken, `${input.phoneNumberId}?fields=id,display_phone_number,verified_name`);
-    const phoneList = await graphRequest<PhoneList>(accessToken, `${input.wabaId}/phone_numbers?fields=id,display_phone_number,verified_name&limit=100`);
+    let activeToken = exchange.access_token;
+    let expiresAt: Date | null = exchange.expires_in ? new Date(Date.now() + exchange.expires_in * 1000) : null;
+
+    // Automatically exchange for a 60-day long-lived token
+    try {
+      const longLived = await exchangeForLongLivedToken(activeToken);
+      if (longLived.isLongLived) {
+        activeToken = longLived.accessToken;
+        expiresAt = longLived.expiresIn ? new Date(Date.now() + longLived.expiresIn * 1000) : new Date(Date.now() + 60 * 24 * 60 * 60 * 1000);
+      } else {
+        const inspected = await inspectToken(activeToken);
+        if (inspected.isPermanent) {
+          expiresAt = null;
+        } else if (inspected.expiresAt) {
+          expiresAt = inspected.expiresAt;
+        }
+      }
+    } catch (e) {
+      console.warn("Could not upgrade token to 60-day token:", e);
+    }
+
+    const phone = await graphRequest<PhoneDetails>(activeToken, `${input.phoneNumberId}?fields=id,display_phone_number,verified_name`);
+    const phoneList = await graphRequest<PhoneList>(activeToken, `${input.wabaId}/phone_numbers?fields=id,display_phone_number,verified_name&limit=100`);
     const verified = phoneList.data?.find(item => item.id === input.phoneNumberId);
     if (!verified) return NextResponse.json({ error: "Meta did not confirm that this phone number belongs to the selected WhatsApp Business Account." }, { status: 403 });
 
     let webhookSubscribed = false;
     try {
-      await graphRequest(accessToken, `${input.wabaId}/subscribed_apps`, { method: "POST", body: JSON.stringify({}) });
+      await graphRequest(activeToken, `${input.wabaId}/subscribed_apps`, { method: "POST", body: JSON.stringify({}) });
       webhookSubscribed = true;
     } catch (error) {
       console.warn("WhatsApp account connected; Meta webhook subscription needs attention:", error instanceof Error ? error.message : "unknown error");
@@ -48,7 +68,6 @@ export async function POST(req: Request) {
 
     const displayPhoneNumber = verified.display_phone_number || phone.display_phone_number || input.displayPhoneNumber;
     if (!displayPhoneNumber) return NextResponse.json({ error: "Meta did not return the registered phone number." }, { status: 422 });
-    const expiresAt = exchange.expires_in ? new Date(Date.now() + exchange.expires_in * 1000) : null;
     const account = await prisma.whatsAppAccount.upsert({
       where: { phone: displayPhoneNumber },
       create: {
@@ -57,7 +76,7 @@ export async function POST(req: Request) {
         phoneNumberId: input.phoneNumberId,
         businessAccountId: input.wabaId,
         metaBusinessId: input.businessId || null,
-        accessTokenEncrypted: encryptAccessToken(accessToken),
+        accessTokenEncrypted: encryptAccessToken(activeToken),
         tokenExpiresAt: expiresAt,
         connectedAt: new Date(),
         webhookSubscribedAt: webhookSubscribed ? new Date() : null,
@@ -68,7 +87,7 @@ export async function POST(req: Request) {
         phoneNumberId: input.phoneNumberId,
         businessAccountId: input.wabaId,
         metaBusinessId: input.businessId || null,
-        accessTokenEncrypted: encryptAccessToken(accessToken),
+        accessTokenEncrypted: encryptAccessToken(activeToken),
         tokenExpiresAt: expiresAt,
         connectedAt: new Date(),
         webhookSubscribedAt: webhookSubscribed ? new Date() : null,
@@ -84,3 +103,4 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Could not connect the WhatsApp account." }, { status });
   }
 }
+

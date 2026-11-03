@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Activity, AlertTriangle, Archive, Bell, CalendarClock, CalendarDays, Check, ChevronRight, CircleHelp, Clock3, ContactRound, FileText, KeyRound, LayoutDashboard, LoaderCircle, LogOut, Menu, MessageCircle, MessageSquare, Pencil, Phone, Plus, RefreshCw, Search, Send, Settings, ShieldCheck, Sparkles, Trash2, Users, X } from "lucide-react";
 
 type Contact = { id: string; name: string; phone: string; email: string | null; groupName: string | null; tags: string[]; optedOut: boolean; marketingOptIn: boolean };
-type Account = { id: string; name: string; phone: string; status: string; phoneNumberId?: string | null; businessAccountId?: string | null; webhookSubscribedAt?: string | null; _count?: { campaignAssignments: number } };
+type Account = { id: string; name: string; phone: string; status: string; phoneNumberId?: string | null; businessAccountId?: string | null; tokenExpiresAt?: string | null; webhookSubscribedAt?: string | null; _count?: { campaignAssignments: number } };
 type Group = { id: string; name: string; description?: string | null; _count: { members: number }; members?: { contactId: string }[] };
 type Campaign = { id: string; name: string; message: string; status: string; total: number; delivered: number; read: number; failed: number; createdAt: string; scheduledAt?: string | null; accountAssignments?: { account: Account }[]; audienceGroup?: Group | null; template?: { id: string; name: string; body: string; status: string; language: string; accountId?: string | null } | null };
 type Template = { id: string; name: string; body: string; status: string; language: string; category?: string; accountId?: string | null; account?: { id: string; name: string; status: string } | null };
@@ -53,6 +53,7 @@ export default function Home() {
   const [contacts, setContacts] = useState<Contact[]>([]), [accounts, setAccounts] = useState<Account[]>([]), [groups, setGroups] = useState<Group[]>([]), [campaigns, setCampaigns] = useState<Campaign[]>([]), [templates, setTemplates] = useState<Template[]>([]), [conversations, setConversations] = useState<Conversation[]>([]), [stats, setStats] = useState<Stats | null>(null), [audience, setAudience] = useState<AudienceData | null>(null);
   const [metaConfig, setMetaConfig] = useState<MetaConfig | null>(null), [signupCode, setSignupCode] = useState(""), [signupDetails, setSignupDetails] = useState<MetaSignupDetails | null>(null), [metaSdkReady, setMetaSdkReady] = useState(false);
   const [selectedConversation, setSelectedConversation] = useState<InboxDetail | null>(null), [search, setSearch] = useState(""), [toast, setToast] = useState(""), [error, setError] = useState(""), [busy, setBusy] = useState(false), [accountForm, setAccountForm] = useState(false), [groupForm, setGroupForm] = useState(false), [templateForm, setTemplateForm] = useState(false), [contactForm, setContactForm] = useState(false), [replyBusy, setReplyBusy] = useState(false);
+  const [tokenForm, setTokenForm] = useState(false), [tokenMode, setTokenMode] = useState<"connect" | "update">("connect"), [tokenAccountId, setTokenAccountId] = useState(""), [tokenAccountName, setTokenAccountName] = useState(""), [tokenPhoneId, setTokenPhoneId] = useState(""), [tokenWabaId, setTokenWabaId] = useState("");
   const refresh = useCallback(async () => {
     setError("");
     try {
@@ -67,6 +68,39 @@ export default function Home() {
   const loadConversation = async (id: string) => { try { const data = await api<InboxDetail>(`/api/inbox/${id}`, { method: "PATCH", body: JSON.stringify({ status: "open" }) }); const detail = await api<InboxDetail>(`/api/inbox/${id}`); setSelectedConversation(detail); await refresh(); } catch (e) { setToast(e instanceof Error ? e.message : "Could not open conversation"); } };
   const createAccount = async (e: React.FormEvent<HTMLFormElement>) => { e.preventDefault(); const form = new FormData(e.currentTarget); setBusy(true); try { await api("/api/accounts", { method: "POST", body: JSON.stringify({ name: form.get("name"), phone: form.get("phone"), phoneNumberId: form.get("phoneNumberId"), businessAccountId: form.get("businessAccountId") }) }); setAccountForm(false); setToast("Sender record saved. Connect it with Meta before sending."); await refresh(); } catch (e) { setToast(e instanceof Error ? e.message : "Could not save account"); } finally { setBusy(false); } };
   const disconnectAccount = async (account: Account) => { if (!confirm(`Disconnect ${account.name} from WhatsApp Cloud API?`)) return; try { await api(`/api/accounts/${account.id}/disconnect`, { method: "POST" }); await refresh(); } catch (e) { setToast(e instanceof Error ? e.message : "Could not disconnect account"); } };
+  const handleTokenSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const form = new FormData(e.currentTarget);
+    const accessToken = String(form.get("accessToken") || "").trim();
+    if (!accessToken) { setToast("Please enter a WhatsApp Access Token"); return; }
+    setBusy(true);
+    try {
+      if (tokenMode === "update" && tokenAccountId) {
+        const res = await api<{ message?: string }>(`/api/accounts/${tokenAccountId}/token`, {
+          method: "POST",
+          body: JSON.stringify({ accessToken }),
+        });
+        setToast(res.message || "Access token updated successfully!");
+      } else {
+        const res = await api<{ message?: string; account: Account }>(`/api/accounts/connect-token`, {
+          method: "POST",
+          body: JSON.stringify({
+            name: form.get("name") || undefined,
+            phoneNumberId: form.get("phoneNumberId"),
+            businessAccountId: form.get("businessAccountId"),
+            accessToken,
+          }),
+        });
+        setToast(res.message || "WhatsApp Account connected with 60-day token!");
+      }
+      setTokenForm(false);
+      await refresh();
+    } catch (err) {
+      setToast(err instanceof Error ? err.message : "Failed to connect token");
+    } finally {
+      setBusy(false);
+    }
+  };
   const createGroup = async (e: React.FormEvent<HTMLFormElement>) => { e.preventDefault(); const form = new FormData(e.currentTarget); const contactIds = form.getAll("contactIds").map(String); setBusy(true); try { await api("/api/audiences", { method: "POST", body: JSON.stringify({ name: form.get("name"), description: form.get("description"), contactIds }) }); setGroupForm(false); setToast("Audience list saved"); await refresh(); } catch (e) { setToast(e instanceof Error ? e.message : "Could not save audience"); } finally { setBusy(false); } };
   const createTemplate = async (e: React.FormEvent<HTMLFormElement>) => { e.preventDefault(); const form = new FormData(e.currentTarget); setBusy(true); try { await api("/api/templates", { method: "POST", body: JSON.stringify({ name: form.get("name"), body: form.get("body"), language: form.get("language"), category: form.get("category"), status: "draft" }) }); setTemplateForm(false); setToast("Draft saved in the database"); await refresh(); } catch (e) { setToast(e instanceof Error ? e.message : "Could not save template"); } finally { setBusy(false); } };
   const createCampaign = async (e: React.FormEvent<HTMLFormElement>) => { e.preventDefault(); const form = new FormData(e.currentTarget); const groupId = String(form.get("groupId") || ""); const group = groups.find(x => x.id === groupId); const contactIds = group ? [] : contacts.filter(c => c.marketingOptIn && !c.optedOut).map(c => c.id); const accountIds = form.getAll("accountIds").map(String); const scheduledAt = String(form.get("scheduledAt") || ""); const templateId = String(form.get("templateId") || ""); setBusy(true); try { await api("/api/campaigns", { method: "POST", body: JSON.stringify({ name: form.get("name"), message: form.get("message"), templateId: templateId || undefined, contactIds, accountIds, ...(group ? { audienceGroupId: group.id } : {}), ...(scheduledAt ? { scheduledAt: new Date(scheduledAt).toISOString() } : {}) }) }); setToast("Campaign and recipient records saved"); await refresh(); setSection("Previous Campaign Records"); } catch (e) { setToast(e instanceof Error ? e.message : "Could not save campaign"); } finally { setBusy(false); } };
@@ -136,7 +170,98 @@ export default function Home() {
 
       {section === "Previous Campaign Records" && <><div className="page-head"><div><h2>Previous Campaign Records</h2><p>Saved campaigns, delivery reports, and recipient totals.</p></div><button className="btn btn-primary" onClick={() => setSection("Create Campaign")}><Plus size={15}/>Create campaign</button></div><div className="card table-card"><CampaignTable campaigns={campaigns} onStatus={campaignStatus} onSend={sendCampaign}/></div></>}
 
-      {section === "Accounts" && <><div className="page-head"><div><h2>WhatsApp Business Accounts</h2><p>Connect an owned business number through Meta Embedded Signup.</p></div><button className="btn btn-primary" disabled={busy || !metaSdkReady} onClick={startMetaSignup}><Plus size={15}/>{metaSdkReady ? "Connect with Meta" : "Loading Meta signup…"}</button></div><div className={`notice ${metaConfig?.enabled ? "" : "warn"}`}>{metaConfig?.enabled ? "Meta signup is configured. Continue in the Meta popup, choose the business and sender number, then approve the requested permissions." : `Meta signup needs ${metaConfig?.missing.join(", ") || "server configuration"}. Add these in Vercel Project → Settings → Environment Variables, then redeploy.`}</div><div className="notice warn"><AlertTriangle size={16}/>Send only to people who opted in. Use approved templates for business-initiated messages.</div><div className="account-grid">{accounts.map(a => <article className="card sender-card" key={a.id}><div className="sender-head"><div><h3>{a.name}</h3><small>{a.phone}</small></div><Pill tone={a.status === "connected" ? "green" : "yellow"}>{a.status}</Pill></div><div className="sender-meta"><span>Assigned campaigns</span><b>{a._count?.campaignAssignments ?? campaigns.filter(c => c.accountAssignments?.some(x => x.account.id === a.id)).length}</b></div>{a.status === "connected" && <p className="help">{a.webhookSubscribedAt ? "Webhooks subscribed" : "Connected; webhook subscription needs attention"}</p>}<div className="sender-actions">{a.status === "connected" ? <button className="btn btn-small" onClick={() => void disconnectAccount(a)}>Disconnect</button> : <Pill>Not connected with Meta</Pill>}<button className="icon-btn danger" onClick={() => void deleteAccount(a)} title="Remove account"><Trash2 size={15}/></button></div></article>)}</div>{accounts.length === 0 && <Empty icon={Phone} title="No sender accounts connected" detail="Use Connect with Meta to securely add a WhatsApp Business number."/>}</>}
+      {section === "Accounts" && <><div className="page-head"><div><h2>WhatsApp Business Accounts</h2><p>Connect with a 60-day Long-Lived Token or through Meta Embedded Signup.</p></div><div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}><button className="btn btn-primary" onClick={() => { setTokenMode("connect"); setTokenAccountId(""); setTokenAccountName(""); setTokenPhoneId(""); setTokenWabaId(""); setTokenForm(!tokenForm); }}><KeyRound size={15}/>{tokenForm && tokenMode === "connect" ? "Close Token Form" : "Connect with Token (60 Days)"}</button><button className="btn" disabled={busy || !metaSdkReady} onClick={startMetaSignup}><Plus size={15}/>{metaSdkReady ? "Connect with Meta Popup" : "Loading Meta popup…"}</button></div></div>
+      {tokenForm && (
+        <form className="card form-card" onSubmit={handleTokenSubmit} style={{ border: "2px solid #22c55e", background: "#f0fdf4" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <h3 style={{ margin: 0 }}>{tokenMode === "update" ? `Update Access Token for “${tokenAccountName}”` : "Connect WhatsApp Account with Access Token"}</h3>
+            <button type="button" className="icon-btn" onClick={() => setTokenForm(false)} title="Close"><X size={16}/></button>
+          </div>
+          <div className="notice" style={{ background: "#ffffff" }}>
+            💡 <b>60-Day Token Auto-Exchange:</b> Paste any WhatsApp Access Token (temporary or permanent). The server will automatically exchange short-lived tokens for a <b>60-day Long-Lived Token</b> using your Meta App credentials, or preserve permanent System User tokens.
+          </div>
+          <div className="form-grid">
+            {tokenMode === "connect" && (
+              <>
+                <Field label="Account / Business Name (optional)">
+                  <input name="name" placeholder="e.g. Rohaan Marketing WhatsApp" />
+                </Field>
+                <Field label="WhatsApp Phone Number ID *">
+                  <input name="phoneNumberId" required placeholder="e.g. 106548729182345" defaultValue={tokenPhoneId} />
+                </Field>
+                <Field label="WhatsApp Business Account ID (WABA ID) *">
+                  <input name="businessAccountId" required placeholder="e.g. 109283746591823" defaultValue={tokenWabaId} />
+                </Field>
+              </>
+            )}
+            <Field label={tokenMode === "update" ? "New WhatsApp Access Token *" : "WhatsApp Access Token *"}>
+              <textarea name="accessToken" required rows={3} placeholder="EAAG... (Paste your token from Meta Developer Portal / System Users / Graph Explorer)" style={{ fontFamily: "monospace", fontSize: "12px", width: "100%" }} />
+            </Field>
+          </div>
+          <div className="form-actions">
+            <button type="button" className="btn" onClick={() => setTokenForm(false)}>Cancel</button>
+            <button className="btn btn-primary" disabled={busy}>
+              {busy ? <LoaderCircle size={14} className="spin" /> : <Check size={14} />}
+              {tokenMode === "update" ? "Save & Verify New Token" : "Verify & Connect Account (60 Days)"}
+            </button>
+          </div>
+        </form>
+      )}
+      <div className={`notice ${metaConfig?.enabled ? "" : "warn"}`}>{metaConfig?.enabled ? "Meta App credentials (META_APP_ID & META_APP_SECRET) are active on the server. Tokens will automatically be exchanged for 60-day validity." : `Meta server settings missing: ${metaConfig?.missing.join(", ") || "configuration"}. Add them in Vercel to enable 60-day token exchange.`}</div>
+      <div className="notice warn"><AlertTriangle size={16}/>Send only to contacts who explicitly opted in. Business-initiated campaigns require approved Meta templates.</div>
+      <div className="account-grid">{accounts.map(a => {
+        let tokenBadge = null;
+        if (a.status === "connected") {
+          if (!a.tokenExpiresAt) {
+            tokenBadge = <p className="help" style={{ color: "#16a34a", fontWeight: "bold" }}>✓ Permanent System User Token</p>;
+          } else {
+            const ms = new Date(a.tokenExpiresAt).getTime() - Date.now();
+            const days = Math.ceil(ms / (1000 * 60 * 60 * 24));
+            if (days > 0) {
+              tokenBadge = <p className="help" style={{ color: "#16a34a", fontWeight: "bold" }}>✓ 60-day token active ({days} days remaining)</p>;
+            } else {
+              tokenBadge = <p className="help" style={{ color: "#dc2626", fontWeight: "bold" }}>⚠️ Token Expired — Please update token</p>;
+            }
+          }
+        }
+        return (
+          <article className="card sender-card" key={a.id}>
+            <div className="sender-head">
+              <div>
+                <h3>{a.name}</h3>
+                <small>{a.phone} {a.phoneNumberId ? `· ID: ${a.phoneNumberId}` : ""}</small>
+              </div>
+              <Pill tone={a.status === "connected" ? "green" : "yellow"}>{a.status}</Pill>
+            </div>
+            <div className="sender-meta">
+              <span>Assigned campaigns</span>
+              <b>{a._count?.campaignAssignments ?? campaigns.filter(c => c.accountAssignments?.some(x => x.account.id === a.id)).length}</b>
+            </div>
+            {tokenBadge}
+            {a.status === "connected" && <p className="help">{a.webhookSubscribedAt ? "Webhooks subscribed" : "Webhooks: auto-subscribed or pending"}</p>}
+            <div className="sender-actions">
+              <button className="btn btn-small" onClick={() => {
+                setTokenMode("update");
+                setTokenAccountId(a.id);
+                setTokenAccountName(a.name);
+                setTokenPhoneId(a.phoneNumberId || "");
+                setTokenWabaId(a.businessAccountId || "");
+                setTokenForm(true);
+                window.scrollTo({ top: 0, behavior: "smooth" });
+              }} title="Update or refresh WhatsApp token">
+                <KeyRound size={13}/>Update Token
+              </button>
+              {a.status === "connected" ? (
+                <button className="btn btn-small" onClick={() => void disconnectAccount(a)}>Disconnect</button>
+              ) : (
+                <Pill>Not connected</Pill>
+              )}
+              <button className="icon-btn danger" onClick={() => void deleteAccount(a)} title="Remove account"><Trash2 size={15}/></button>
+            </div>
+          </article>
+        );
+      })}</div>
+      {accounts.length === 0 && <Empty icon={Phone} title="No sender accounts connected" detail="Use 'Connect with Token' or 'Connect with Meta Popup' to securely add your WhatsApp Business number."/>}</>}
 
       {section === "Create Campaign" && <><div className="page-head"><div><h2>Create Campaign</h2><p>Choose a consented audience, Meta template, and the connected sender that owns it.</p></div><Pill tone="pink">Campaign workspace</Pill></div><form className="card campaign-form" onSubmit={createCampaign}><div className="campaign-columns"><div><Field label="Campaign name"><input name="name" required placeholder="e.g. September update" defaultValue={`Campaign ${new Date().toLocaleDateString()}`}/></Field><Field label="Audience pool"><select name="groupId"><option value="">All opted-in contacts ({audience?.eligible ?? 0})</option>{groups.map(g => <option key={g.id} value={g.id}>{g.name} ({g._count.members})</option>)}</select></Field><Field label="WhatsApp template"><select name="templateId" defaultValue=""><option value="">Save as draft without a template</option>{templates.map(t => <option key={t.id} value={t.id}>{t.name} · {t.status.toUpperCase()}</option>)}</select></Field><Field label="Optional internal note"><textarea name="message" maxLength={4096} placeholder="Optional note for your campaign record"/></Field><Field label="Schedule (optional)"><input name="scheduledAt" type="datetime-local" min={new Date().toISOString().slice(0, 16)}/></Field><p className="help">Scheduled sends need an approved Meta template, a connected sender assigned to it, and recorded opt-in consent. Drafts never send automatically.</p></div><div className="assigned-box"><h3>Assigned accounts</h3>{accounts.length ? accounts.map(a => <label className="check-row" key={a.id}><input name="accountIds" type="checkbox" value={a.id}/><span><b>{a.name}</b><small>{a.phone} · {a.status}</small></span><Pill tone={a.status === "connected" ? "green" : "yellow"}>{a.status}</Pill></label>) : <div className="empty compact"><Phone size={18}/><b>No sender accounts</b><small>Connect one with Meta before sending.</small></div>}<button type="button" className="btn btn-small" onClick={() => setSection("Accounts")}><Plus size={13}/>Manage accounts</button></div></div><div className="form-actions"><span className="help">Only current, explicit marketing opt-ins are included.</span><button className="btn btn-primary" disabled={busy}>{busy ? <LoaderCircle size={14}/> : <Check size={14}/>}Save campaign</button></div></form></>}
 

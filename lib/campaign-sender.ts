@@ -24,11 +24,19 @@ export async function sendCampaignBatch(campaignId: string, batchSize = 10) {
   if (campaign.status === "paused") throw new Error("Resume this campaign before sending.");
   if (!campaign.template || campaign.template.status !== "approved") throw new Error("Choose a Meta-approved template before sending a campaign.");
 
-  const account = campaign.accountAssignments.map(item => item.account).find(item =>
-    item.status === "connected" && item.phoneNumberId && item.accessTokenEncrypted && item.id === campaign.template?.accountId,
+  // Find assigned connected account; prioritize template owner, or fallback to assigned connected account
+  const assignedAccounts = campaign.accountAssignments.map(item => item.account).filter(
+    item => item.status === "connected" && item.phoneNumberId && (item.accessTokenEncrypted || process.env.WA_ACCESS_TOKEN)
   );
-  if (!account) throw new Error("Assign the connected sender that owns this approved template.");
-  if (account.tokenExpiresAt && account.tokenExpiresAt.getTime() <= Date.now()) throw new Error("The WhatsApp access token has expired. Reconnect this sender with Meta.");
+
+  const account =
+    assignedAccounts.find(item => item.id === campaign.template?.accountId) ||
+    assignedAccounts[0];
+
+  if (!account) throw new Error("Assign a connected sender with a valid WhatsApp number to this campaign.");
+  if (account.tokenExpiresAt && account.tokenExpiresAt.getTime() <= Date.now()) {
+    throw new Error(`The WhatsApp access token for "${account.name}" has expired (${account.tokenExpiresAt.toLocaleDateString()}). Please update the token in the Accounts section.`);
+  }
   accountAccessToken(account);
 
   await prisma.message.updateMany({

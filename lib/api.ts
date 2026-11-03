@@ -1,5 +1,11 @@
 import { NextResponse } from "next/server";
+
 export function apiError(error: unknown) {
-  console.error("API error", error instanceof Error ? error.message : "unknown");
-  return NextResponse.json({ error: "The request could not be completed. Check the database and server configuration." }, { status: 503 });
+  const message = error instanceof Error ? error.message : "Unknown server error occurred.";
+  console.error("API error details:", error);
+  return NextResponse.json(
+    { error: message || "The request could not be completed. Check database configuration." },
+    { status: 503 }
+  );
 }
+
