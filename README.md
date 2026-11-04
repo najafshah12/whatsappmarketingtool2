@@ -78,13 +78,15 @@ Set `DATABASE_URL` and `DATABASE_URL_UNPOOLED` in the deployment environment. Ap
 
 ## Live deployment
 
-Production runs at <https://whatsappmarketingtool-main.vercel.app> (Vercel project `whatsappmarketingtool-main`) with a Neon Postgres database provisioned from the Vercel Marketplace. The project is linked locally through `.vercel/project.json`, which is gitignored.
+Production runs at <https://test-phi-jet-82.vercel.app> (Vercel project `test`, team `najafale-3828s-projects`) with a Neon Postgres database provisioned from the Vercel Marketplace. The project is connected to this GitHub repository, so every push to `main` deploys automatically.
 
-To publish a new build, run:
+Deploy manually when needed:
 
 ```sh
-vercel deploy --prod
+vercel deploy --prod --yes
 ```
+
+A second deployment, <https://whatsappmarketingtool-main.vercel.app>, runs the same code against its own Neon database. Treat `test-phi-jet-82.vercel.app` as the primary workspace.
 
 After any environment-variable change, redeploy so the new values reach the runtimes. Quick checks after a release:
 
@@ -92,4 +94,4 @@ After any environment-variable change, redeploy so the new values reach the runt
 - Signing in works, and the first sign-in forces a password change (minimum 12 characters).
 - `GET /api/cron/campaigns` returns `200` with `Authorization: Bearer <CRON_SECRET>` and `401` without it.
 
-Migrations are not run automatically during the Vercel build; apply them against the production database before deploying schema changes:
+The `test` project runs `prisma migrate deploy` as part of its production build command, so schema changes are applied automatically on deploy. For any other environment, apply migrations before deploying schema-dependent code:
