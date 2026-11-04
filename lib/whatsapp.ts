@@ -23,6 +23,19 @@ export function getMetaAppConfig() {
   };
 }
 
+/**
+ * Placeholder values (for example "[SENSITIVE]") can end up in an environment
+ * after a masked env pull is pushed back. Treat them as missing so the UI does
+ * not advertise a broken one-click signup.
+ */
+export function isUsableMetaAppId(value: string) {
+  return /^\d{5,}$/.test(value);
+}
+
+export function isUsableMetaAppSecret(value: string) {
+  return value.length >= 20 && !value.toLowerCase().includes("sensitive");
+}
+
 function encryptionKey() {
   const secret = process.env.WA_TOKEN_ENCRYPTION_KEY?.trim() || process.env.AUTH_SESSION_SECRET?.trim();
   if (!secret || secret.length < 32) throw new Error("Set WA_TOKEN_ENCRYPTION_KEY to a stable secret of at least 32 characters.");

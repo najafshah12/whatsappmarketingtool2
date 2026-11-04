@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getMetaAppConfig, isUsableMetaAppId, isUsableMetaAppSecret } from "@/lib/whatsapp";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 10;
@@ -19,7 +20,8 @@ export async function GET() {
     checks.database = "unavailable";
   }
 
-  checks.meta = process.env.META_APP_ID && process.env.META_APP_SECRET ? "configured" : "missing";
+  const meta = getMetaAppConfig();
+  checks.meta = isUsableMetaAppId(meta.appId) && isUsableMetaAppSecret(meta.appSecret) ? "configured" : "invalid";
   checks.scheduledSender = (process.env.CRON_SECRET?.trim().length || 0) >= 32 ? "configured" : "missing";
   checks.tokenEncryption = (process.env.WA_TOKEN_ENCRYPTION_KEY || process.env.AUTH_SESSION_SECRET || "").length >= 32 ? "configured" : "missing";
 
