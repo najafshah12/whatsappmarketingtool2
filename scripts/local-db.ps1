@@ -3,7 +3,9 @@ param(
   [string]$Action = "start"
 )
 
-$ErrorActionPreference = "Stop"
+# Native tools such as psql write probe failures to stderr, which must not
+# abort the script before it gets a chance to start the cluster.
+$ErrorActionPreference = "Continue"
 $pgBin = "C:\Program Files\PostgreSQL\16\bin"
 $dataDir = Join-Path $env:LOCALAPPDATA "reachpulse-pg\data"
 $logFile = Join-Path $env:LOCALAPPDATA "reachpulse-pg\postgres.log"

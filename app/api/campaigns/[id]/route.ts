@@ -33,3 +33,18 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     return apiError(error);
   }
 }
+
+export async function DELETE(_: Request, { params }: { params: Promise<{ id: string }> }) {
+  try {
+    const { id } = await params;
+    await prisma.$transaction([
+      prisma.messageEvent.deleteMany({ where: { message: { campaignId: id } } }),
+      prisma.message.deleteMany({ where: { campaignId: id } }),
+      prisma.campaign.delete({ where: { id } }),
+    ]);
+    await prisma.auditLog.create({ data: { action: "campaign.deleted", entity: "campaign", entityId: id } });
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    return apiError(error);
+  }
+}
