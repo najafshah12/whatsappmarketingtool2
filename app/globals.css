@@ -18,3 +18,6 @@
 
 
 .toast{max-width:min(560px,calc(100vw - 50px));line-height:1.5;text-align:left}
+
+.import-options{grid-template-columns:minmax(0,1.1fr) minmax(320px,1fr);align-items:start;gap:12px 20px}.import-consent .check-row{align-items:flex-start;min-width:0;margin:0}.import-consent .check-row>span{min-width:0;flex:1}.import-consent .check-row small{line-height:1.45}@media(max-width:760px){.import-options{grid-template-columns:minmax(0,1fr)}}
+
