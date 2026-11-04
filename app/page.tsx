@@ -59,6 +59,9 @@ export default function Home() {
   const [selectedConversation, setSelectedConversation] = useState<InboxDetail | null>(null), [search, setSearch] = useState(""), [toast, setToast] = useState(""), [error, setError] = useState(""), [busy, setBusy] = useState(false), [accountForm, setAccountForm] = useState(false), [groupForm, setGroupForm] = useState(false), [templateForm, setTemplateForm] = useState(false), [contactForm, setContactForm] = useState(false), [replyBusy, setReplyBusy] = useState(false);
   const [tokenForm, setTokenForm] = useState(false), [tokenMode, setTokenMode] = useState<"connect" | "update">("connect"), [tokenAccountId, setTokenAccountId] = useState(""), [tokenAccountName, setTokenAccountName] = useState(""), [tokenPhoneId, setTokenPhoneId] = useState(""), [tokenWabaId, setTokenWabaId] = useState("");
   const [health, setHealth] = useState<{ status: string; checks: Record<string, string>; responseTimeMs: number } | null>(null), [healthBusy, setHealthBusy] = useState(false);
+  const [verifyingId, setVerifyingId] = useState("");
+  const [testingId, setTestingId] = useState("");
+  const [origin, setOrigin] = useState("");
   const refresh = useCallback(async () => {
     setError("");
     try {
@@ -67,13 +70,44 @@ export default function Home() {
     } catch (e) { setError(e instanceof Error ? e.message : "Could not load workspace data"); }
   }, []);
   useEffect(() => { void refresh(); }, [refresh]);
-  useEffect(() => { if (!toast) return; const id = setTimeout(() => setToast(""), 3000); return () => clearTimeout(id); }, [toast]);
+  useEffect(() => { setOrigin(window.location.origin); }, []);
+  useEffect(() => { if (!toast) return; const id = setTimeout(() => setToast(""), Math.min(10000, Math.max(3000, toast.length * 55))); return () => clearTimeout(id); }, [toast]);
 
   const filteredConversations = useMemo(() => conversations.filter(x => `${x.contact.name} ${x.contact.phone} ${x.messages[0]?.body ?? ""}`.toLowerCase().includes(search.toLowerCase())), [conversations, search]);
   const loadConversation = async (id: string) => { try { const data = await api<InboxDetail>(`/api/inbox/${id}`, { method: "PATCH", body: JSON.stringify({ status: "open" }) }); const detail = await api<InboxDetail>(`/api/inbox/${id}`); setSelectedConversation(detail); await refresh(); } catch (e) { setToast(e instanceof Error ? e.message : "Could not open conversation"); } };
   const runHealthCheck = async () => { setHealthBusy(true); try { const response = await fetch("/api/health", { cache: "no-store" }); const result = await response.json(); setHealth(result); setToast(result.status === "ok" ? "All systems healthy." : "Some checks need attention."); } catch (e) { setHealth(null); setToast(e instanceof Error ? e.message : "Health check failed"); } finally { setHealthBusy(false); } };
   const createAccount = async (e: React.FormEvent<HTMLFormElement>) => { e.preventDefault(); const form = new FormData(e.currentTarget); setBusy(true); try { await api("/api/accounts", { method: "POST", body: JSON.stringify({ name: form.get("name"), phone: form.get("phone"), phoneNumberId: form.get("phoneNumberId"), businessAccountId: form.get("businessAccountId") }) }); setAccountForm(false); setToast("Sender record saved. Connect it with Meta before sending."); await refresh(); } catch (e) { setToast(e instanceof Error ? e.message : "Could not save account"); } finally { setBusy(false); } };
   const disconnectAccount = async (account: Account) => { if (!confirm(`Disconnect ${account.name} from WhatsApp Cloud API?`)) return; try { await api(`/api/accounts/${account.id}/disconnect`, { method: "POST" }); await refresh(); } catch (e) { setToast(e instanceof Error ? e.message : "Could not disconnect account"); } };
+  const verifyAccount = async (account: Account) => {
+    setVerifyingId(account.id);
+    try {
+      const res = await api<{ ok: boolean; phone?: string; verifiedName?: string; qualityRating?: string | null; isPermanent: boolean; daysRemaining: number | null; expiresAt: string | null }>(`/api/accounts/${account.id}/verify`, { method: "POST" });
+      const expiry = res.isPermanent
+        ? "permanent token"
+        : res.daysRemaining != null
+          ? `token valid ${res.daysRemaining} more day(s)`
+          : "token expiry unknown";
+      setToast(`Live ✓ ${res.verifiedName || account.name} · ${res.phone || account.phone} · quality ${res.qualityRating || "not rated"} · ${expiry}`);
+      await refresh();
+    } catch (e) {
+      setToast(e instanceof Error ? e.message : "Could not check this sender");
+    } finally {
+      setVerifyingId("");
+    }
+  };
+  const sendTestMessage = async (account: Account) => {
+    const to = prompt(`Send a WhatsApp test template from ${account.name} to which number?\n\nInclude the country code, for example +923001234567`, "");
+    if (!to) return;
+    setTestingId(account.id);
+    try {
+      const res = await api<{ message?: string }>(`/api/accounts/${account.id}/test-send`, { method: "POST", body: JSON.stringify({ to }) });
+      setToast(res.message || "Test message accepted by Meta.");
+    } catch (e) {
+      setToast(e instanceof Error ? e.message : "Could not send the test message");
+    } finally {
+      setTestingId("");
+    }
+  };
   const handleTokenSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
@@ -224,6 +258,32 @@ export default function Home() {
       )}
       <div className={`notice ${metaConfig?.enabled ? "" : "warn"}`}>{metaConfig?.enabled ? "Meta App credentials (META_APP_ID & META_APP_SECRET) are active on the server. Tokens will automatically be exchanged for 60-day validity." : `Meta server settings missing: ${metaConfig?.missing.join(", ") || "configuration"}. Add them in Vercel to enable 60-day token exchange.`}</div>
       <div className="notice warn"><AlertTriangle size={16}/>Send only to contacts who explicitly opted in. Business-initiated campaigns require approved Meta templates.</div>
+      <div className="card" style={{ marginBottom: "14px", background: "#f8fbff", border: "1px solid #d7e6f5" }}>
+        <div className="card-head">
+          <div>
+            <h3>Meta setup checklist</h3>
+            <p>Everything Meta needs before a real campaign can leave WhatsApp.</p>
+          </div>
+          <Pill tone={metaConfig?.enabled ? "green" : "yellow"}>{metaConfig?.enabled ? "App credentials active" : "App credentials missing"}</Pill>
+        </div>
+        <div className="form-grid">
+          <Field label="Webhook callback URL (Meta → WhatsApp → Configuration)">
+            <input readOnly value={origin ? `${origin}/api/webhook` : "Loading…"} onFocus={e => e.currentTarget.select()} />
+          </Field>
+          <Field label="Webhook fields to subscribe">
+            <input readOnly value="messages, message_template_status_update" onFocus={e => e.currentTarget.select()} />
+          </Field>
+        </div>
+        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+          <a className="btn btn-small" href="https://business.facebook.com/wa/manage/phone-numbers/" target="_blank" rel="noreferrer"><Phone size={13}/>Add / verify phone number</a>
+          <a className="btn btn-small" href="https://business.facebook.com/settings/whatsapp-business-accounts" target="_blank" rel="noreferrer">WABA settings</a>
+          <a className="btn btn-small" href={`https://developers.facebook.com/apps/${metaConfig?.appId || ""}/whatsapp-business/wa-settings/`} target="_blank" rel="noreferrer">App WhatsApp settings</a>
+          <a className="btn btn-small" href={`https://developers.facebook.com/tools/explorer/${metaConfig?.appId || ""}/`} target="_blank" rel="noreferrer"><KeyRound size={13}/>Get access token</a>
+        </div>
+        <p className="help" style={{ marginTop: "10px" }}>
+          Meta&apos;s shared Test WABA only holds its demo number — a Pakistani number must be added to your own WhatsApp Business Account, verified by SMS or voice call, and the Meta app must be in Live mode before customer messages are delivered.
+        </p>
+      </div>
       <div className="account-grid">{accounts.map(a => {
         let tokenBadge = null;
         if (a.status === "connected") {
@@ -255,6 +315,16 @@ export default function Home() {
             {tokenBadge}
             {a.status === "connected" && <p className="help">{a.webhookSubscribedAt ? "Webhooks subscribed" : "Webhooks: auto-subscribed or pending"}</p>}
             <div className="sender-actions">
+              {a.status === "connected" && (
+                <button className="btn btn-small" disabled={verifyingId === a.id} onClick={() => void verifyAccount(a)} title="Ask Meta whether this number can send right now">
+                  <RefreshCw size={13}/>{verifyingId === a.id ? "Checking…" : "Check Connection"}
+                </button>
+              )}
+              {a.status === "connected" && (
+                <button className="btn btn-small" disabled={testingId === a.id} onClick={() => void sendTestMessage(a)} title="Send an approved template to your own number">
+                  <Send size={13}/>{testingId === a.id ? "Sending…" : "Send Test"}
+                </button>
+              )}
               <button className="btn btn-small" onClick={() => {
                 setTokenMode("update");
                 setTokenAccountId(a.id);
