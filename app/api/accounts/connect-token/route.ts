@@ -14,7 +14,7 @@ const schema = z.object({
   name: z.string().trim().max(80).optional(),
   phone: z.string().trim().max(40).optional(),
   phoneNumberId: z.string().trim().optional(),
-  businessAccountId: z.string().trim().regex(/^\d{5,35}$/, "Invalid WhatsApp Business Account ID (WABA ID) format."),
+  businessAccountId: z.string().trim().optional(),
   accessToken: z.string().trim().min(20, "WhatsApp Access Token is required."),
 });
 
@@ -29,6 +29,15 @@ function digits(value: string | undefined | null) {
   return (value || "").replace(/\D/g, "");
 }
 
+/** Compare numbers ignoring country-code prefixes and national leading zeros. */
+function sameNumber(a: string, b: string) {
+  const clean = (value: string) => value.replace(/^0+/, "");
+  const left = clean(digits(a));
+  const right = clean(digits(b));
+  if (!left || !right) return false;
+  return left === right || left.endsWith(right) || right.endsWith(left);
+}
+
 function metaHint(error: WhatsAppApiError) {
   if (error.graphCode === 190) return "The access token is invalid or expired — generate a new token.";
   if (error.graphCode === 100) return "The Phone Number ID or WABA ID is wrong, or the number is not registered on this WABA.";
@@ -41,6 +50,43 @@ async function listWabaNumbers(accessToken: string, wabaId: string) {
     accessToken,
     `${encodeURIComponent(wabaId)}/phone_numbers?fields=id,display_phone_number,verified_name,code_verification_status&limit=100`
   );
+}
+
+/**
+ * Best-effort discovery of the WhatsApp Business Accounts a token can reach.
+ * Works for system-user tokens (assigned WABAs) and for user tokens that carry
+ * the business_management permission (WABAs owned by the user's businesses).
+ */
+async function discoverWabaIds(accessToken: string): Promise<string[]> {
+  const ids = new Set<string>();
+  try {
+    const assigned = await graphRequest<{ data?: { id: string }[] }>(
+      accessToken,
+      "me/assigned_whatsapp_business_accounts?fields=id&limit=100"
+    );
+    for (const item of assigned.data ?? []) if (item.id) ids.add(item.id);
+  } catch {
+    // The token may not be a system-user token; fall through to owned WABAs.
+  }
+  if (ids.size > 0) return [...ids];
+
+  try {
+    const businesses = await graphRequest<{ data?: { id: string }[] }>(accessToken, "me/businesses?fields=id&limit=100");
+    for (const business of businesses.data ?? []) {
+      try {
+        const owned = await graphRequest<{ data?: { id: string }[] }>(
+          accessToken,
+          `${encodeURIComponent(business.id)}/owned_whatsapp_business_accounts?fields=id&limit=100`
+        );
+        for (const item of owned.data ?? []) if (item.id) ids.add(item.id);
+      } catch {
+        // Skip businesses the token cannot inspect.
+      }
+    }
+  } catch {
+    // No business_management scope.
+  }
+  return [...ids];
 }
 
 export async function POST(req: Request) {
@@ -79,29 +125,55 @@ export async function POST(req: Request) {
       expiresAt = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000);
     }
 
-    // 2. Resolve the phone number ID. A valid ID can be supplied directly;
-    // otherwise it is discovered from the WABA so the operator can just type
-    // the phone number instead of hunting for a 16-digit ID.
+    // 2. Resolve the WABA. A pasted ID is used directly; otherwise the token is
+    // asked which WhatsApp Business Accounts it can reach, so the operator only
+    // has to supply a token and (optionally) a phone number.
+    const suppliedWaba = digits(input.businessAccountId);
+    let candidates: string[] = [];
+    if (/^\d{5,35}$/.test(suppliedWaba)) {
+      candidates = [suppliedWaba];
+    } else {
+      candidates = await discoverWabaIds(activeToken);
+      if (candidates.length === 0) {
+        return NextResponse.json(
+          {
+            error:
+              "Could not detect a WhatsApp Business Account from this token. Paste your WABA ID in the WABA ID field (Meta Business Settings → Accounts → WhatsApp accounts), or use the Meta Popup connection.",
+          },
+          { status: 400 }
+        );
+      }
+    }
+
+    // 3. Resolve the phone number ID. A valid ID can be supplied directly;
+    // otherwise it is matched inside the discovered WABA(s).
     let phoneNumberId = digits(input.phoneNumberId);
+    let resolvedWaba = candidates[0];
     if (!/^\d{5,35}$/.test(phoneNumberId)) {
-      let numbers: WabaPhoneNumber[] = [];
-      try {
-        const listed = await listWabaNumbers(activeToken, input.businessAccountId);
-        numbers = listed.data ?? [];
-      } catch (error) {
-        if (error instanceof WhatsAppApiError) {
-          const hint = metaHint(error);
+      const wanted = digits(input.phone);
+      const collected: { wabaId: string; number: WabaPhoneNumber }[] = [];
+      let firstError: WhatsAppApiError | null = null;
+
+      for (const wabaId of candidates) {
+        try {
+          const listed = await listWabaNumbers(activeToken, wabaId);
+          for (const number of listed.data ?? []) collected.push({ wabaId, number });
+        } catch (error) {
+          if (error instanceof WhatsAppApiError && !firstError) firstError = error;
+          if (!(error instanceof WhatsAppApiError)) throw error;
+        }
+      }
+
+      if (collected.length === 0) {
+        if (firstError) {
+          const hint = metaHint(firstError);
           return NextResponse.json(
             {
-              error: `Could not read the phone numbers of WABA ${input.businessAccountId}: ${error.message} (HTTP ${error.status}).${hint ? ` ${hint}` : ""}`,
+              error: `Could not read the phone numbers of WABA ${candidates.join(", ")}: ${firstError.message} (HTTP ${firstError.status}).${hint ? ` ${hint}` : ""}`,
             },
             { status: 400 }
           );
         }
-        throw error;
-      }
-
-      if (numbers.length === 0) {
         return NextResponse.json(
           {
             error:
@@ -111,30 +183,25 @@ export async function POST(req: Request) {
         );
       }
 
-      const wanted = digits(input.phone);
-      const match =
-        (wanted
-          ? numbers.find((number) => {
-              const actual = digits(number.display_phone_number);
-              return actual.length > 0 && (actual === wanted || actual.endsWith(wanted) || wanted.endsWith(actual));
-            })
-          : undefined) ?? (numbers.length === 1 ? numbers[0] : undefined);
+      const byNumber = wanted ? collected.find(entry => sameNumber(entry.number.display_phone_number || "", wanted)) : undefined;
+      const match = byNumber ?? (collected.length === 1 ? collected[0] : undefined);
 
       if (!match) {
-        const available = numbers
-          .map((number) => `${number.display_phone_number || "unknown"} (ID ${number.id})`)
+        const available = collected
+          .map(entry => `${entry.number.display_phone_number || "unknown"} (ID ${entry.number.id})`)
           .join(", ");
         return NextResponse.json(
           {
-            error: `That phone number was not found in WABA ${input.businessAccountId}. Numbers on this account: ${available}. Enter one of them, or paste its Phone Number ID.`,
+            error: `That phone number was not found on this token's WhatsApp Business Account(s). Available numbers: ${available}. Enter one of them, or paste its Phone Number ID.`,
           },
           { status: 400 }
         );
       }
-      phoneNumberId = match.id;
+      phoneNumberId = match.number.id;
+      resolvedWaba = match.wabaId;
     }
 
-    // 3. Verify token against Meta WhatsApp Phone Number ID
+    // 4. Verify token against Meta WhatsApp Phone Number ID
     let phoneInfo: { id: string; display_phone_number?: string; verified_name?: string } | null = null;
     try {
       phoneInfo = await verifyWhatsAppPhoneNumber(activeToken, phoneNumberId);
@@ -161,10 +228,10 @@ export async function POST(req: Request) {
 
     const verifiedName = phoneInfo?.verified_name || input.name || displayPhone;
 
-    // 4. Auto-subscribe to Meta Webhook events
+    // 5. Auto-subscribe to Meta Webhook events
     let webhookSubscribed = false;
     try {
-      await graphRequest(activeToken, `${input.businessAccountId}/subscribed_apps`, {
+      await graphRequest(activeToken, `${resolvedWaba}/subscribed_apps`, {
         method: "POST",
         body: JSON.stringify({}),
       });
@@ -176,14 +243,14 @@ export async function POST(req: Request) {
       );
     }
 
-    // 5. Save/update account in database
+    // 6. Save/update account in database
     const account = await prisma.whatsAppAccount.upsert({
       where: { phone: displayPhone },
       create: {
         name: verifiedName,
         phone: displayPhone,
         phoneNumberId,
-        businessAccountId: input.businessAccountId,
+        businessAccountId: resolvedWaba,
         accessTokenEncrypted: encryptAccessToken(activeToken),
         tokenExpiresAt: expiresAt,
         connectedAt: new Date(),
@@ -194,7 +261,7 @@ export async function POST(req: Request) {
         name: verifiedName,
         phone: displayPhone,
         phoneNumberId,
-        businessAccountId: input.businessAccountId,
+        businessAccountId: resolvedWaba,
         accessTokenEncrypted: encryptAccessToken(activeToken),
         tokenExpiresAt: expiresAt,
         connectedAt: new Date(),
@@ -218,7 +285,7 @@ export async function POST(req: Request) {
         action: "whatsapp.account.token_connected",
         entity: "whatsapp_account",
         entityId: account.id,
-        detail: { tokenType, expiresAt: expiresAt?.toISOString() },
+        detail: { tokenType, wabaId: resolvedWaba, expiresAt: expiresAt?.toISOString() },
       },
     });
 

@@ -224,7 +224,7 @@ export default function Home() {
             <button type="button" className="icon-btn" onClick={() => setTokenForm(false)} title="Close"><X size={16}/></button>
           </div>
           <div className="notice" style={{ background: "#ffffff" }}>
-            💡 <b>60-Day Token Auto-Exchange:</b> Paste any WhatsApp Access Token (temporary or permanent). The server exchanges short-lived tokens for a <b>60-day Long-Lived Token</b> using your Meta App credentials, or preserves permanent System User tokens. Enter the WABA ID and your phone number — the Phone Number ID is detected automatically.
+            💡 <b>Token-only connection:</b> Paste any WhatsApp Access Token (temporary or permanent). The server exchanges short-lived tokens for a <b>60-day Long-Lived Token</b> and then finds your WABA, phone number and Phone Number ID automatically. Only fill the IDs if auto-detection cannot reach your account.
           </div>
           <div className="form-grid">
             {tokenMode === "connect" && (
@@ -232,14 +232,14 @@ export default function Home() {
                 <Field label="Account / Business Name (optional)">
                   <input name="name" placeholder="e.g. Rohaan Marketing WhatsApp" />
                 </Field>
-                <Field label="WhatsApp phone number (for auto-detect)">
+                <Field label="WhatsApp phone number (optional — used to pick the number)">
                   <input name="phone" placeholder="e.g. +92 300 1234567" />
                 </Field>
                 <Field label="WhatsApp Phone Number ID (optional — auto-detected)">
-                  <input name="phoneNumberId" placeholder="Leave empty to look it up in the WABA" defaultValue={tokenPhoneId} />
+                  <input name="phoneNumberId" placeholder="Leave empty to look it up automatically" defaultValue={tokenPhoneId} />
                 </Field>
-                <Field label="WhatsApp Business Account ID (WABA ID) *">
-                  <input name="businessAccountId" required placeholder="e.g. 109283746591823" defaultValue={tokenWabaId} />
+                <Field label="WhatsApp Business Account ID / WABA ID (optional — auto-detected)">
+                  <input name="businessAccountId" placeholder="Leave empty to detect from the token" defaultValue={tokenWabaId} />
                 </Field>
               </>
             )}
@@ -286,6 +286,7 @@ export default function Home() {
       </div>
       <div className="account-grid">{accounts.map(a => {
         let tokenBadge = null;
+        let expired = false;
         if (a.status === "connected") {
           if (!a.tokenExpiresAt) {
             tokenBadge = <p className="help" style={{ color: "#16a34a", fontWeight: "bold" }}>✓ Permanent System User Token</p>;
@@ -295,6 +296,7 @@ export default function Home() {
             if (days > 0) {
               tokenBadge = <p className="help" style={{ color: "#16a34a", fontWeight: "bold" }}>✓ 60-day token active ({days} days remaining)</p>;
             } else {
+              expired = true;
               tokenBadge = <p className="help" style={{ color: "#dc2626", fontWeight: "bold" }}>⚠️ Token Expired — Please update token</p>;
             }
           }
@@ -306,7 +308,7 @@ export default function Home() {
                 <h3>{a.name}</h3>
                 <small>{a.phone} {a.phoneNumberId ? `· ID: ${a.phoneNumberId}` : ""}</small>
               </div>
-              <Pill tone={a.status === "connected" ? "green" : "yellow"}>{a.status}</Pill>
+              <Pill tone={a.status === "connected" ? (expired ? "red" : "green") : "yellow"}>{expired ? "token expired" : a.status}</Pill>
             </div>
             <div className="sender-meta">
               <span>Assigned campaigns</span>
