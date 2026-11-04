@@ -4,9 +4,10 @@ import { createSessionToken, sessionCookieName, verifyPassword } from "@/lib/aut
 
 // Small in-process throttle. Serverless instances keep their own counters,
 // so this slows down brute-force attempts per instance without a shared store.
+// Kept short (5 minutes) so a mistyped password never locks the admin out for long.
 const attempts = new Map<string, { count: number; resetAt: number }>();
-const MAX_ATTEMPTS = 5;
-const WINDOW_MS = 10 * 60 * 1000;
+const MAX_ATTEMPTS = 8;
+const WINDOW_MS = 5 * 60 * 1000;
 
 function clientKey(req: Request, username: string) {
   const forwarded = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
