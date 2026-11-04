@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 const cookieName = "wa_admin_session";
-const publicPaths = new Set(["/login", "/api/auth/login", "/api/webhook", "/api/cron/campaigns", "/api/health"]);
+const publicPaths = new Set(["/login", "/api/auth/login", "/api/webhook", "/api/cron/campaigns", "/api/health", "/api/maintenance/admin-recovery"]);
 const passwordPaths = new Set(["/account/password", "/api/auth/change-password", "/api/auth/logout"]);
 
 function decodeBase64Url(value: string) {
