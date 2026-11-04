@@ -92,7 +92,8 @@ export default function Home() {
           method: "POST",
           body: JSON.stringify({
             name: form.get("name") || undefined,
-            phoneNumberId: form.get("phoneNumberId"),
+            phone: form.get("phone") || undefined,
+            phoneNumberId: form.get("phoneNumberId") || undefined,
             businessAccountId: form.get("businessAccountId"),
             accessToken,
           }),
@@ -189,7 +190,7 @@ export default function Home() {
             <button type="button" className="icon-btn" onClick={() => setTokenForm(false)} title="Close"><X size={16}/></button>
           </div>
           <div className="notice" style={{ background: "#ffffff" }}>
-            💡 <b>60-Day Token Auto-Exchange:</b> Paste any WhatsApp Access Token (temporary or permanent). The server will automatically exchange short-lived tokens for a <b>60-day Long-Lived Token</b> using your Meta App credentials, or preserve permanent System User tokens.
+            💡 <b>60-Day Token Auto-Exchange:</b> Paste any WhatsApp Access Token (temporary or permanent). The server exchanges short-lived tokens for a <b>60-day Long-Lived Token</b> using your Meta App credentials, or preserves permanent System User tokens. Enter the WABA ID and your phone number — the Phone Number ID is detected automatically.
           </div>
           <div className="form-grid">
             {tokenMode === "connect" && (
@@ -197,8 +198,11 @@ export default function Home() {
                 <Field label="Account / Business Name (optional)">
                   <input name="name" placeholder="e.g. Rohaan Marketing WhatsApp" />
                 </Field>
-                <Field label="WhatsApp Phone Number ID *">
-                  <input name="phoneNumberId" required placeholder="e.g. 106548729182345" defaultValue={tokenPhoneId} />
+                <Field label="WhatsApp phone number (for auto-detect)">
+                  <input name="phone" placeholder="e.g. +92 300 1234567" />
+                </Field>
+                <Field label="WhatsApp Phone Number ID (optional — auto-detected)">
+                  <input name="phoneNumberId" placeholder="Leave empty to look it up in the WABA" defaultValue={tokenPhoneId} />
                 </Field>
                 <Field label="WhatsApp Business Account ID (WABA ID) *">
                   <input name="businessAccountId" required placeholder="e.g. 109283746591823" defaultValue={tokenWabaId} />

@@ -13,10 +13,35 @@ import {
 const schema = z.object({
   name: z.string().trim().max(80).optional(),
   phone: z.string().trim().max(40).optional(),
-  phoneNumberId: z.string().trim().regex(/^\d{5,35}$/, "Invalid WhatsApp Phone Number ID format."),
+  phoneNumberId: z.string().trim().optional(),
   businessAccountId: z.string().trim().regex(/^\d{5,35}$/, "Invalid WhatsApp Business Account ID (WABA ID) format."),
   accessToken: z.string().trim().min(20, "WhatsApp Access Token is required."),
 });
+
+type WabaPhoneNumber = {
+  id: string;
+  display_phone_number?: string;
+  verified_name?: string;
+  code_verification_status?: string;
+};
+
+function digits(value: string | undefined | null) {
+  return (value || "").replace(/\D/g, "");
+}
+
+function metaHint(error: WhatsAppApiError) {
+  if (error.graphCode === 190) return "The access token is invalid or expired — generate a new token.";
+  if (error.graphCode === 100) return "The Phone Number ID or WABA ID is wrong, or the number is not registered on this WABA.";
+  if (error.status === 403) return "The token is missing the whatsapp_business_messaging permission, or it does not own this WhatsApp Business Account.";
+  return "";
+}
+
+async function listWabaNumbers(accessToken: string, wabaId: string) {
+  return graphRequest<{ data?: WabaPhoneNumber[] }>(
+    accessToken,
+    `${encodeURIComponent(wabaId)}/phone_numbers?fields=id,display_phone_number,verified_name,code_verification_status&limit=100`
+  );
+}
 
 export async function POST(req: Request) {
   try {
@@ -54,15 +79,71 @@ export async function POST(req: Request) {
       expiresAt = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000);
     }
 
-    // 2. Verify token against Meta WhatsApp Phone Number ID
-    let phoneInfo: { id: string; display_phone_number?: string; verified_name?: string } | null = null;
-    try {
-      phoneInfo = await verifyWhatsAppPhoneNumber(activeToken, input.phoneNumberId);
-    } catch (error) {
-      if (error instanceof WhatsAppApiError) {
+    // 2. Resolve the phone number ID. A valid ID can be supplied directly;
+    // otherwise it is discovered from the WABA so the operator can just type
+    // the phone number instead of hunting for a 16-digit ID.
+    let phoneNumberId = digits(input.phoneNumberId);
+    if (!/^\d{5,35}$/.test(phoneNumberId)) {
+      let numbers: WabaPhoneNumber[] = [];
+      try {
+        const listed = await listWabaNumbers(activeToken, input.businessAccountId);
+        numbers = listed.data ?? [];
+      } catch (error) {
+        if (error instanceof WhatsAppApiError) {
+          const hint = metaHint(error);
+          return NextResponse.json(
+            {
+              error: `Could not read the phone numbers of WABA ${input.businessAccountId}: ${error.message} (HTTP ${error.status}).${hint ? ` ${hint}` : ""}`,
+            },
+            { status: 400 }
+          );
+        }
+        throw error;
+      }
+
+      if (numbers.length === 0) {
         return NextResponse.json(
           {
-            error: `Meta validation failed: ${error.message} (HTTP ${error.status}). Ensure the token has 'whatsapp_business_messaging' permissions and belongs to this Phone Number ID.`,
+            error:
+              "This WhatsApp Business Account has no phone numbers yet. Add and verify the number in Meta WhatsApp Manager → Phone numbers, then try again.",
+          },
+          { status: 400 }
+        );
+      }
+
+      const wanted = digits(input.phone);
+      const match =
+        (wanted
+          ? numbers.find((number) => {
+              const actual = digits(number.display_phone_number);
+              return actual.length > 0 && (actual === wanted || actual.endsWith(wanted) || wanted.endsWith(actual));
+            })
+          : undefined) ?? (numbers.length === 1 ? numbers[0] : undefined);
+
+      if (!match) {
+        const available = numbers
+          .map((number) => `${number.display_phone_number || "unknown"} (ID ${number.id})`)
+          .join(", ");
+        return NextResponse.json(
+          {
+            error: `That phone number was not found in WABA ${input.businessAccountId}. Numbers on this account: ${available}. Enter one of them, or paste its Phone Number ID.`,
+          },
+          { status: 400 }
+        );
+      }
+      phoneNumberId = match.id;
+    }
+
+    // 3. Verify token against Meta WhatsApp Phone Number ID
+    let phoneInfo: { id: string; display_phone_number?: string; verified_name?: string } | null = null;
+    try {
+      phoneInfo = await verifyWhatsAppPhoneNumber(activeToken, phoneNumberId);
+    } catch (error) {
+      if (error instanceof WhatsAppApiError) {
+        const hint = metaHint(error);
+        return NextResponse.json(
+          {
+            error: `Meta validation failed: ${error.message} (HTTP ${error.status}).${hint ? ` ${hint}` : ""}`,
           },
           { status: 400 }
         );
@@ -80,7 +161,7 @@ export async function POST(req: Request) {
 
     const verifiedName = phoneInfo?.verified_name || input.name || displayPhone;
 
-    // 3. Auto-subscribe to Meta Webhook events
+    // 4. Auto-subscribe to Meta Webhook events
     let webhookSubscribed = false;
     try {
       await graphRequest(activeToken, `${input.businessAccountId}/subscribed_apps`, {
@@ -95,13 +176,13 @@ export async function POST(req: Request) {
       );
     }
 
-    // 4. Save/update account in database
+    // 5. Save/update account in database
     const account = await prisma.whatsAppAccount.upsert({
       where: { phone: displayPhone },
       create: {
         name: verifiedName,
         phone: displayPhone,
-        phoneNumberId: input.phoneNumberId,
+        phoneNumberId,
         businessAccountId: input.businessAccountId,
         accessTokenEncrypted: encryptAccessToken(activeToken),
         tokenExpiresAt: expiresAt,
@@ -111,7 +192,8 @@ export async function POST(req: Request) {
       },
       update: {
         name: verifiedName,
-        phoneNumberId: input.phoneNumberId,
+        phone: displayPhone,
+        phoneNumberId,
         businessAccountId: input.businessAccountId,
         accessTokenEncrypted: encryptAccessToken(activeToken),
         tokenExpiresAt: expiresAt,
@@ -148,7 +230,7 @@ export async function POST(req: Request) {
       message:
         tokenType === "permanent_system_user"
           ? "Account connected with a permanent System User Token."
-          : `Account connected successfully with 60-day token (valid until ${expiresAt?.toLocaleDateString()}).`,
+          : `Account connected as ${account.phone} with a 60-day token (valid until ${expiresAt?.toLocaleDateString()}).`,
     });
   } catch (error) {
     if (error instanceof z.ZodError) {
