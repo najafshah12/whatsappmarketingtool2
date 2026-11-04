@@ -19,15 +19,40 @@ export async function POST(_: Request, { params }: { params: Promise<{ id: strin
     const { id } = await params;
     const account = await prisma.whatsAppAccount.findUnique({ where: { id } });
     if (!account) return NextResponse.json({ error: "Account not found." }, { status: 404 });
-    if (account.status !== "connected" || !account.phoneNumberId) {
+    if (account.status !== "connected" && account.status !== "expired") {
       return NextResponse.json({ error: "Connect this sender with Meta before checking it." }, { status: 409 });
+    }
+    if (!account.phoneNumberId) {
+      return NextResponse.json({ error: "This sender has no WhatsApp Phone Number ID. Reconnect it to continue." }, { status: 409 });
     }
 
     const token = accountAccessToken(account);
-    const [info, inspected] = await Promise.all([
-      verifyWhatsAppPhoneNumber(token, account.phoneNumberId),
-      inspectToken(token).catch(() => null),
-    ]);
+    const inspected = await inspectToken(token).catch(() => null);
+
+    let info: { id: string; display_phone_number?: string; verified_name?: string; quality_rating?: string };
+    try {
+      info = await verifyWhatsAppPhoneNumber(token, account.phoneNumberId);
+    } catch (error) {
+      if (error instanceof WhatsAppApiError && error.graphCode === 190) {
+        await prisma.whatsAppAccount.update({
+          where: { id },
+          data: {
+            status: "expired",
+            tokenExpiresAt: inspected?.expiresAt ?? account.tokenExpiresAt ?? new Date(),
+          },
+        });
+        return NextResponse.json(
+          {
+            ok: false,
+            error: `${error.message} The access token is invalid or expired — paste a fresh token with Update Token.`,
+            code: error.graphCode,
+            expired: true,
+          },
+          { status: 400 }
+        );
+      }
+      throw error;
+    }
 
     const expiresAt = inspected?.expiresAt ?? account.tokenExpiresAt ?? null;
     const isPermanent = inspected?.isPermanent ?? !account.tokenExpiresAt;

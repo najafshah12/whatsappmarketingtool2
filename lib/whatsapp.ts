@@ -172,9 +172,11 @@ export async function inspectToken(token: string): Promise<{
 
     if (data.data) {
       const d = data.data;
-      const isValid = Boolean(d.is_valid);
-      const isPermanent = d.expires_at === 0 || d.type === "SYSTEM_USER";
-      const expiresAt = isPermanent || !d.expires_at ? null : new Date(d.expires_at * 1000);
+      const isValid = d.is_valid !== false;
+      // Only expires_at === 0 means "never expires". A time-limited System User
+      // token still has a real expiry, and an invalid token is never permanent.
+      const isPermanent = isValid && d.expires_at === 0;
+      const expiresAt = !isPermanent && d.expires_at ? new Date(d.expires_at * 1000) : null;
       return {
         isValid,
         type: d.type,

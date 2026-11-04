@@ -286,18 +286,18 @@ export default function Home() {
       </div>
       <div className="account-grid">{accounts.map(a => {
         let tokenBadge = null;
-        let expired = false;
-        if (a.status === "connected") {
-          if (!a.tokenExpiresAt) {
+        let expired = a.status === "expired";
+        if (a.status === "connected" || expired) {
+          if (!a.tokenExpiresAt && !expired) {
             tokenBadge = <p className="help" style={{ color: "#16a34a", fontWeight: "bold" }}>✓ Permanent System User Token</p>;
           } else {
-            const ms = new Date(a.tokenExpiresAt).getTime() - Date.now();
+            const ms = a.tokenExpiresAt ? new Date(a.tokenExpiresAt).getTime() - Date.now() : 0;
             const days = Math.ceil(ms / (1000 * 60 * 60 * 24));
-            if (days > 0) {
+            if (!expired && days > 0) {
               tokenBadge = <p className="help" style={{ color: "#16a34a", fontWeight: "bold" }}>✓ 60-day token active ({days} days remaining)</p>;
             } else {
               expired = true;
-              tokenBadge = <p className="help" style={{ color: "#dc2626", fontWeight: "bold" }}>⚠️ Token Expired — Please update token</p>;
+              tokenBadge = <p className="help" style={{ color: "#dc2626", fontWeight: "bold" }}>⚠️ Token expired — paste a fresh token with Update Token</p>;
             }
           }
         }
@@ -308,16 +308,16 @@ export default function Home() {
                 <h3>{a.name}</h3>
                 <small>{a.phone} {a.phoneNumberId ? `· ID: ${a.phoneNumberId}` : ""}</small>
               </div>
-              <Pill tone={a.status === "connected" ? (expired ? "red" : "green") : "yellow"}>{expired ? "token expired" : a.status}</Pill>
+              <Pill tone={a.status === "connected" ? (expired ? "red" : "green") : a.status === "expired" ? "red" : "yellow"}>{expired ? "token expired" : a.status}</Pill>
             </div>
             <div className="sender-meta">
               <span>Assigned campaigns</span>
               <b>{a._count?.campaignAssignments ?? campaigns.filter(c => c.accountAssignments?.some(x => x.account.id === a.id)).length}</b>
             </div>
             {tokenBadge}
-            {a.status === "connected" && <p className="help">{a.webhookSubscribedAt ? "Webhooks subscribed" : "Webhooks: auto-subscribed or pending"}</p>}
+            {(a.status === "connected" || a.status === "expired") && <p className="help">{a.webhookSubscribedAt ? "Webhooks subscribed" : "Webhooks: auto-subscribed or pending"}</p>}
             <div className="sender-actions">
-              {a.status === "connected" && (
+              {(a.status === "connected" || a.status === "expired") && (
                 <button className="btn btn-small" disabled={verifyingId === a.id} onClick={() => void verifyAccount(a)} title="Ask Meta whether this number can send right now">
                   <RefreshCw size={13}/>{verifyingId === a.id ? "Checking…" : "Check Connection"}
                 </button>
@@ -338,7 +338,7 @@ export default function Home() {
               }} title="Update or refresh WhatsApp token">
                 <KeyRound size={13}/>Update Token
               </button>
-              {a.status === "connected" ? (
+              {a.status !== "disconnected" ? (
                 <button className="btn btn-small" onClick={() => void disconnectAccount(a)}>Disconnect</button>
               ) : (
                 <Pill>Not connected</Pill>
