@@ -75,3 +75,21 @@ The protected endpoint is `GET /api/cron/campaigns`; set a private `CRON_SECRET`
 The app uses a single-admin username and password. Set `ADMIN_USERNAME`, a scrypt `ADMIN_PASSWORD_HASH`, and a private `AUTH_SESSION_SECRET` (at least 32 characters). Change the initial password after signing in. For local setup, run `pnpm run auth:setup-local`; to generate a deployment hash, run `pnpm run auth:hash-password`. Never put plain passwords or provider secrets in Git.
 
 Set `DATABASE_URL` and `DATABASE_URL_UNPOOLED` in the deployment environment. Apply database migrations with `pnpm exec prisma migrate deploy` before deploying schema-dependent code. Build with `pnpm run build` and serve with `pnpm run start`.
+
+## Live deployment
+
+Production runs at <https://whatsappmarketingtool-main.vercel.app> (Vercel project `whatsappmarketingtool-main`) with a Neon Postgres database provisioned from the Vercel Marketplace. The project is linked locally through `.vercel/project.json`, which is gitignored.
+
+To publish a new build, run:
+
+```sh
+vercel deploy --prod
+```
+
+After any environment-variable change, redeploy so the new values reach the runtimes. Quick checks after a release:
+
+- `GET /api/health` returns `200` with `database: connected`.
+- Signing in works, and the first sign-in forces a password change (minimum 12 characters).
+- `GET /api/cron/campaigns` returns `200` with `Authorization: Bearer <CRON_SECRET>` and `401` without it.
+
+Migrations are not run automatically during the Vercel build; apply them against the production database before deploying schema changes:
