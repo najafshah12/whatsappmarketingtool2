@@ -5,8 +5,11 @@ import { apiError } from "@/lib/api";
 import { normalizePhone } from "@/lib/phone";
 
 const row = z.object({
-  name: z.string().trim().min(1).max(100),
-  phone: z.string().trim().min(1).max(32),
+  name: z.string().trim().max(100).optional().default(""),
+  phone: z.preprocess(
+    value => typeof value === "number" && Number.isSafeInteger(value) ? String(value) : value,
+    z.string().trim().min(1).max(32)
+  ),
   email: z.string().email().optional().or(z.literal("")),
   groupName: z.string().trim().max(100).optional(),
   tags: z.array(z.string().trim().max(40)).max(20).default([]),
@@ -43,7 +46,7 @@ export async function POST(req: Request) {
       const optedOut = contact.optedOut;
       const marketingOptIn = contact.marketingOptIn && !optedOut;
       data.set(phone, {
-        name: contact.name,
+        name: contact.name || `User ${index + 1}`,
         phone,
         email: contact.email || null,
         groupName: contact.groupName || null,
@@ -88,3 +91,4 @@ export async function POST(req: Request) {
     return apiError(error);
   }
 }
+

@@ -5,8 +5,11 @@ import { apiError } from "@/lib/api";
 import { normalizePhone } from "@/lib/phone";
 
 const schema = z.object({
-  name: z.string().trim().min(1).max(100),
-  phone: z.string().trim().min(1).max(32),
+  name: z.string().trim().max(100).optional().default(""),
+  phone: z.preprocess(
+    value => typeof value === "number" && Number.isSafeInteger(value) ? String(value) : value,
+    z.string().trim().min(1).max(32)
+  ),
   email: z.string().email().optional().or(z.literal("")),
   groupName: z.string().max(100).optional(),
   tags: z.array(z.string().max(40)).max(20).optional(),
@@ -56,6 +59,7 @@ export async function POST(req: Request) {
     const contact = await prisma.contact.create({
       data: {
         ...body,
+        name: body.name || "User 1",
         phone,
         email: body.email || null,
         marketingOptIn: optIn,
@@ -74,3 +78,4 @@ export async function POST(req: Request) {
     return apiError(error);
   }
 }
+
