@@ -77,6 +77,11 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 export async function DELETE(_: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
+    const contact = await prisma.contact.findUnique({ where: { id }, select: { _count: { select: { messages: true } } } });
+    if (!contact) return NextResponse.json({ error: "Contact not found." }, { status: 404 });
+    if (contact._count.messages > 0) {
+      return NextResponse.json({ error: "This contact has campaign message history and cannot be deleted. Opt it out instead." }, { status: 409 });
+    }
     await prisma.contact.delete({ where: { id } });
     await prisma.auditLog.create({ data: { action: "contact.deleted", entity: "contact", entityId: id } });
     return NextResponse.json({ ok: true });
@@ -84,3 +89,4 @@ export async function DELETE(_: Request, { params }: { params: Promise<{ id: str
     return apiError(error);
   }
 }
+

@@ -15,6 +15,7 @@ const schema = z.object({
   tags: z.array(z.string().max(40)).max(20).optional(),
   marketingOptIn: z.boolean().default(false),
 });
+const deleteSchema = z.object({ ids: z.array(z.string().min(1)).min(1).max(500) });
 
 export async function GET(req: Request) {
   try {
@@ -74,6 +75,36 @@ export async function POST(req: Request) {
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: error.issues[0]?.message ?? "Invalid contact" }, { status: 400 });
+    }
+    return apiError(error);
+  }
+}
+
+export async function DELETE(req: Request) {
+  try {
+    const { ids: requestedIds } = deleteSchema.parse(await req.json());
+    const ids = [...new Set(requestedIds)];
+    const result = await prisma.$transaction(async tx => {
+      const existing = await tx.contact.count({ where: { id: { in: ids } } });
+      const deleted = await tx.contact.deleteMany({
+        where: { id: { in: ids }, messages: { none: {} } },
+      });
+      const skippedWithHistory = Math.max(0, existing - deleted.count);
+      if (deleted.count) {
+        await tx.auditLog.create({
+          data: {
+            action: "contacts.deleted",
+            entity: "contact",
+            detail: { deleted: deleted.count, skippedWithHistory },
+          },
+        });
+      }
+      return { deleted: deleted.count, skippedWithHistory };
+    });
+    return NextResponse.json(result);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return NextResponse.json({ error: error.issues[0]?.message || "Choose contacts to delete." }, { status: 400 });
     }
     return apiError(error);
   }

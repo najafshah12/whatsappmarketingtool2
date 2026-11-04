@@ -20,4 +20,5 @@
 .toast{max-width:min(560px,calc(100vw - 50px));line-height:1.5;text-align:left}
 
 .import-options{display:grid!important;grid-template-columns:minmax(0,1fr)!important;align-items:start!important;gap:14px!important;padding:18px 20px 4px}.import-options>.field{width:100%;min-width:0}.import-options>.field input{height:42px;min-height:42px}.import-consent .check-row{display:grid;grid-template-columns:18px minmax(0,1fr);align-items:start;gap:10px;width:100%;margin:0;padding:12px}.import-consent .check-row>span{min-width:0}.import-consent .check-row small{line-height:1.45}.import-actions{justify-content:flex-start;align-items:center;flex-wrap:wrap;padding:8px 20px 20px;margin-top:0}
+.contact-toolbar{display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap}.contact-select-all{display:flex;align-items:center;gap:6px;font-size:10px;font-weight:700;color:#596a7d;white-space:nowrap}.contact-select{width:15px;height:15px;accent-color:var(--pink);cursor:pointer}.contact-row-actions{display:flex;align-items:center;gap:6px}.contact-delete{color:#c53030;border-color:#f0caca}.contact-delete:hover{background:#fff0f0;border-color:#e7a9a9}
 
