@@ -7,3 +7,9 @@ coverage
 /tsconfig.tsbuildinfo
 /outputs/
 /work/
+.vercel
+.env*
+
+.vercel
+.env.vercel.production
+
