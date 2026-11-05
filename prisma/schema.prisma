@@ -67,6 +67,7 @@ model Template {
   status         String           @default("draft")
   language       String           @default("en_US")
   category       String           @default("marketing")
+  buttons        Json?
   createdAt      DateTime         @default(now())
   metaTemplateId String?          @unique
   accountId      String?
@@ -195,3 +196,4 @@ model AuditLog {
   userId    String?
   user      User?    @relation(fields: [userId], references: [id])
 }
+

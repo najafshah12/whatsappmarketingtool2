@@ -5,6 +5,7 @@ import { accountAccessToken, graphRequest, WhatsAppApiError } from "@/lib/whatsa
 
 const schema = z.object({ accountId: z.string().min(1) });
 type MetaTemplate = { id?: string; name?: string; status?: string; language?: string; category?: string };
+type TemplateButton = { type: "QUICK_REPLY"; text: string } | { type: "URL"; text: string; url: string } | { type: "PHONE_NUMBER"; text: string; phoneNumber: string };
 type TemplateList = { data?: MetaTemplate[] };
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -28,13 +29,22 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       if (!metaTemplate) return NextResponse.json({ error: "Meta did not return this template. Check the connected account and retry." }, { status: 404 });
     } else {
       const variableCount = Math.max(0, ...[...template.body.matchAll(/\{\{(\d+)\}\}/g)].map(match => Number(match[1])));
+      const buttons = Array.isArray(template.buttons) ? template.buttons as TemplateButton[] : [];
+      const components = [
+        { type: "BODY", text: template.body, ...(variableCount ? { example: { body_text: [Array.from({ length: variableCount }, (_, index) => `Example ${index + 1}`)] } } : {}) },
+        ...(buttons.length ? [{ type: "BUTTONS", buttons: buttons.map(button => button.type === "URL"
+          ? { type: "URL", text: button.text, url: button.url }
+          : button.type === "PHONE_NUMBER"
+            ? { type: "PHONE_NUMBER", text: button.text, phone_number: button.phoneNumber }
+            : { type: "QUICK_REPLY", text: button.text }) }] : []),
+      ];
       const response = await graphRequest<MetaTemplate>(accessToken, path, {
         method: "POST",
         body: JSON.stringify({
           name: template.name,
           language: template.language,
           category: template.category.toUpperCase(),
-          components: [{ type: "BODY", text: template.body, ...(variableCount ? { example: { body_text: [Array.from({ length: variableCount }, (_, index) => `Example ${index + 1}`)] } } : {}) }],
+          components,
         }),
       });
       metaTemplate = { ...response, status: response.status || "PENDING", id: response.id || template.metaTemplateId || undefined };
@@ -58,3 +68,4 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     return NextResponse.json({ error: error instanceof Error ? error.message : "Could not sync this template with Meta." }, { status });
   }
 }
+

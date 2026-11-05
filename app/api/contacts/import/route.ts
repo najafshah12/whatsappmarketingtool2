@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { prisma } from "@/lib/prisma";
 import { apiError } from "@/lib/api";
-import { normalizePhone } from "@/lib/phone";
+import { attachContactsToAudience, importContactRecords } from "@/lib/contact-import";
 
 const row = z.object({
   name: z.string().trim().max(100).optional().default(""),
@@ -17,72 +16,28 @@ const row = z.object({
   optedOut: z.boolean().default(false),
 });
 
-const schema = z.object({ contacts: z.array(row).min(1).max(1000) });
+const schema = z.object({
+  contacts: z.array(row).min(1).max(50000),
+  groupName: z.string().trim().max(100).optional(),
+  marketingOptIn: z.boolean().optional(),
+});
 
 export async function POST(req: Request) {
   try {
-    const { contacts } = schema.parse(await req.json());
-    const createdAt = new Date();
-    const invalidRows: number[] = [];
-    const data = new Map<string, {
-      name: string;
-      phone: string;
-      email: string | null;
-      groupName: string | null;
-      tags: string[];
-      optedOut: boolean;
-      marketingOptIn: boolean;
-      marketingOptInAt: Date | null;
-      marketingOptInSource: string | null;
-    }>();
-
-    contacts.forEach((contact, index) => {
-      const phone = normalizePhone(contact.phone);
-      if (!phone) {
-        // +2 accounts for the header row in the uploaded CSV.
-        invalidRows.push(index + 2);
-        return;
-      }
-      const optedOut = contact.optedOut;
-      const marketingOptIn = contact.marketingOptIn && !optedOut;
-      data.set(phone, {
-        name: contact.name || `User ${index + 1}`,
-        phone,
-        email: contact.email || null,
-        groupName: contact.groupName || null,
-        tags: contact.tags,
-        optedOut,
-        marketingOptIn,
-        marketingOptInAt: marketingOptIn ? createdAt : null,
-        marketingOptInSource: marketingOptIn ? "csv-import-confirmed" : null,
-      });
-    });
-
-    if (invalidRows.length) {
-      const preview = invalidRows.slice(0, 8).join(", ");
-      return NextResponse.json(
-        {
-          error: `Invalid international phone number${invalidRows.length === 1 ? "" : "s"} on CSV row${invalidRows.length === 1 ? "" : "s"} ${preview}${invalidRows.length > 8 ? "…" : ""}. Use a format like +14155550123.`,
-        },
-        { status: 400 }
-      );
-    }
-
-    const result = await prisma.contact.createMany({
-      data: [...data.values()],
-      skipDuplicates: true,
-    });
-    await prisma.auditLog.create({
-      data: {
-        action: "contacts.imported",
-        entity: "contact",
-        detail: { created: result.count, submitted: contacts.length, duplicatesInFile: contacts.length - data.size },
-      },
-    });
+    const { contacts, groupName, marketingOptIn = false } = schema.parse(await req.json());
+    const result = await importContactRecords(contacts.map(contact => ({
+      ...contact,
+      groupName: contact.groupName || groupName,
+      marketingOptIn: marketingOptIn || contact.marketingOptIn,
+    })));
+    const audience = groupName ? await attachContactsToAudience(groupName, result.contactIds) : null;
     return NextResponse.json({
-      created: result.count,
-      skipped: contacts.length - result.count,
-      duplicatesInFile: contacts.length - data.size,
+      created: result.created,
+      skipped: result.skipped,
+      invalid: result.invalid,
+      invalidSamples: result.invalidSamples,
+      duplicatesInFile: result.duplicatesInFile,
+      audience: audience ? { id: audience.id, name: audience.name } : null,
     });
   } catch (error) {
     if (error instanceof z.ZodError) {

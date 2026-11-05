@@ -22,7 +22,10 @@ export async function importContactRecords(records: ContactRecord[], rowNumbers?
   });
   const values = [...data.values()];
   let created = 0;
-  if (values.length) created = (await prisma.contact.createMany({ data: values, skipDuplicates: true })).count;
+  for (let offset = 0; offset < values.length; offset += 1000) {
+    const batch = values.slice(offset, offset + 1000);
+    created += (await prisma.contact.createMany({ data: batch, skipDuplicates: true })).count;
+  }
   const saved = values.length ? await prisma.contact.findMany({ where: { phone: { in: values.map(value => value.phone) } }, select: { id: true } }) : [];
   await prisma.auditLog.create({ data: { action: "contacts.imported", entity: "contact", detail: { created, submitted: records.length, invalid, duplicatesInFile: records.length - values.length - invalid } } });
   return { created, skipped: records.length - invalid - created, duplicatesInFile: Math.max(0, records.length - values.length - invalid), invalid, invalidSamples, contactIds: saved.map(contact => contact.id) };
@@ -32,7 +35,10 @@ export async function attachContactsToAudience(groupName: string, contactIds: st
   const name = groupName.trim().slice(0, 80);
   if (!name || !contactIds.length) return null;
   const group = await prisma.audienceGroup.upsert({ where: { name }, create: { name, description: "Created from a contact file import" }, update: {} });
-  await prisma.audienceMembership.createMany({ data: contactIds.map(contactId => ({ groupId: group.id, contactId })), skipDuplicates: true });
+  for (let offset = 0; offset < contactIds.length; offset += 1000) {
+    const batch = contactIds.slice(offset, offset + 1000);
+    await prisma.audienceMembership.createMany({ data: batch.map(contactId => ({ groupId: group.id, contactId })), skipDuplicates: true });
+  }
   return group;
 }
 
