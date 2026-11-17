@@ -43,7 +43,8 @@ export async function POST(req: Request) {
     if (input.audienceGroupId && !group) return NextResponse.json({ error: "Audience list not found." }, { status: 404 });
     if (input.templateId && !template) return NextResponse.json({ error: "Template not found." }, { status: 404 });
     if (input.accountIds.length !== accounts.length) return NextResponse.json({ error: "One or more sender accounts were not found." }, { status: 400 });
-    if (input.rotationIntervalSeconds > 0 && accounts.filter(account => account.status === "connected" && account.phoneNumberId && account.accessTokenEncrypted).length < 2) return NextResponse.json({ error: "Sender rotation needs at least two connected WhatsApp numbers with valid tokens." }, { status: 409 });
+    const selectedAccounts = input.accountIds.map(id => accounts.find(account => account.id === id)!);
+    if (input.rotationIntervalSeconds > 0 && selectedAccounts.filter(account => account.status === "connected" && account.phoneNumberId && account.accessTokenEncrypted).length < 2) return NextResponse.json({ error: "Sender rotation needs at least two connected WhatsApp numbers with valid tokens." }, { status: 409 });
     if (scheduledAt) {
       if (!template || template.status !== "approved") return NextResponse.json({ error: "Scheduled campaigns need a Meta-approved template." }, { status: 409 });
       if (!accounts.some(account => account.status === "connected" && account.phoneNumberId && account.id === template.accountId && account.accessTokenEncrypted)) return NextResponse.json({ error: "Assign the connected sender that owns this approved template." }, { status: 409 });
@@ -70,7 +71,7 @@ export async function POST(req: Request) {
         total: eligible.length,
         ...(template ? { template: { connect: { id: template.id } } } : {}),
         ...(group ? { audienceGroup: { connect: { id: group.id } } } : {}),
-        ...(accounts.length ? { accountAssignments: { create: accounts.map(account => ({ account: { connect: { id: account.id } } })) } } : {}),
+        ...(accounts.length ? { accountAssignments: { create: selectedAccounts.map(account => ({ account: { connect: { id: account.id } } })) } } : {}),
         ...(eligible.length ? { messages: { create: eligible.map(contact => ({ contactId: contact.id, status: "queued" })) } } : {}),
       },
       include: { accountAssignments: { include: { account: { select: { id: true, name: true, phone: true, status: true, phoneNumberId: true } } } }, audienceGroup: true, template: true, _count: { select: { messages: true } } },
