@@ -13,3 +13,5 @@ coverage
 .vercel
 .env.vercel.production
 
+
+logs/

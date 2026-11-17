@@ -14,6 +14,29 @@ ReachPulse is a WhatsApp Business campaign workspace built with Next.js, React, 
 
 The app never marks a template approved by itself, and it does not send marketing campaigns to imported contacts unless the CSV explicitly includes a consent value. Use only numbers you own and contacts who agreed to receive messages.
 
+## Everyday use (self-hosted QR senders)
+
+The QR channel runs on your own PC: a Baileys bridge plus a free Cloudflare tunnel.
+Everything is started and self-healed by one script.
+
+1. **Start everything** — double-click `Start WhatsApp CRM.bat` (or run
+   `powershell -ExecutionPolicy Bypass -File .\scripts\start-all.ps1`). It starts
+   the bridge, the tunnel and the campaign worker, and only fixes what is broken.
+2. **Auto-start** — `scripts\install-autostart.ps1` registers the scheduled task
+   `WhatsAppCRM-Stack`; it runs at logon and re-checks every 10 minutes, so a PC
+   restart or a dropped tunnel repairs itself.
+3. **Add numbers** — WhatsApp Accounts → *Scan with QR* → name, number, session
+   (suggested automatically) → scan on the phone → *Add another number*.
+4. **Send** — Create Campaign → audience + message → set the delay → Send.
+   Messages loop through every connected number; leave the assignment empty to
+   use all of them. QR senders keep a 20s gap **per number**.
+5. **Background sending** — the worker keeps campaigns draining when the
+   dashboard is closed. Stop it from Task Manager, restart with
+   `node scripts\campaign-worker.mjs`.
+
+Logs land in `logs\` (`stack.log`, `bridge.log`, `tunnel.log`, `worker.log`).
+Details: [docs/BRIDGE.md](docs/BRIDGE.md).
+
 ## Requirements and local startup
 
 - Node.js 20+

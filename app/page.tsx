@@ -49,6 +49,7 @@ export default function Home() {
   const [selectedConversation, setSelectedConversation] = useState<InboxDetail | null>(null), [search, setSearch] = useState(""), [toast, setToast] = useState(""), [error, setError] = useState(""), [busy, setBusy] = useState(false), [accountForm, setAccountForm] = useState(false), [groupForm, setGroupForm] = useState(false), [templateForm, setTemplateForm] = useState(false), [contactForm, setContactForm] = useState(false), [replyBusy, setReplyBusy] = useState(false);
   const [tokenForm, setTokenForm] = useState(false), [tokenMode, setTokenMode] = useState<"connect" | "update">("connect"), [tokenAccountId, setTokenAccountId] = useState(""), [tokenAccountName, setTokenAccountName] = useState(""), [tokenPhoneId, setTokenPhoneId] = useState(""), [tokenWabaId, setTokenWabaId] = useState("");
   const [qrModal, setQrModal] = useState<{ account?: Account } | null>(null);
+  const [bridgeHealth, setBridgeHealth] = useState<"checking" | "online" | "offline">("checking");
   const [health, setHealth] = useState<{ status: string; checks: Record<string, string>; responseTimeMs: number } | null>(null), [healthBusy, setHealthBusy] = useState(false);
   const [verifyingId, setVerifyingId] = useState("");
   const [testingId, setTestingId] = useState("");
@@ -66,6 +67,21 @@ export default function Home() {
   }, []);
   useEffect(() => { void refresh(); }, [refresh]);
   useEffect(() => { setOrigin(window.location.origin); }, []);
+  // Bridge/tunnel health, so a dropped quick tunnel is visible before a scan fails.
+  useEffect(() => {
+    let cancelled = false;
+    const check = async () => {
+      try {
+        const body = await fetch("/api/health", { cache: "no-store" }).then(response => response.json());
+        if (!cancelled) setBridgeHealth(body?.checks?.bridgeReachable === "yes" ? "online" : "offline");
+      } catch {
+        if (!cancelled) setBridgeHealth("offline");
+      }
+    };
+    void check();
+    const id = setInterval(() => void check(), 60000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, []);
   useEffect(() => { if (!toast) return; const id = setTimeout(() => setToast(""), Math.min(10000, Math.max(3000, toast.length * 55))); return () => clearTimeout(id); }, [toast]);
 
   const filteredConversations = useMemo(() => conversations.filter(x => `${x.contact.name} ${x.contact.phone} ${x.messages[0]?.body ?? ""}`.toLowerCase().includes(search.toLowerCase())), [conversations, search]);
@@ -285,7 +301,7 @@ export default function Home() {
       {section === "Previous Campaign Records" && <><div className="page-head"><div><h2>Campaign Records</h2><p>Historical campaign data, dispatch logs, and delivery metrics.</p></div><button className="btn btn-primary" onClick={() => setSection("Create Campaign")}><Plus size={15}/>Create campaign</button></div><div className="card table-card"><CampaignTable campaigns={campaigns} onStatus={campaignStatus} onSend={sendCampaign} onDelete={deleteCampaign}/></div></>}
 
       {section === "Campaign Reports" && <><div className="page-head"><div><h2>Campaign Reports</h2><p>Download a recipient-by-recipient PDF with delivery, pending, skipped, and failure details.</p></div></div><div className="card table-card"><table className="table"><thead><tr><th>CAMPAIGN</th><th>STATUS</th><th>SUCCESS RATE</th><th>DELIVERED / READ</th><th>FAILED</th><th>RECIPIENTS</th><th>REPORT</th></tr></thead><tbody>{campaigns.map(c => { const success = c.total ? Math.round((c.delivered / c.total) * 100) : 0; return <tr key={c.id}><td><b>{c.name}</b><small>{date(c.createdAt)}</small></td><td><Pill>{c.status}</Pill></td><td>{success}%</td><td>{c.delivered.toLocaleString()}</td><td className="error-text">{c.failed.toLocaleString()}</td><td>{c.total.toLocaleString()}</td><td><a className="btn btn-small" href={`/api/campaigns/${c.id}/report`}><FileText size={14}/>Download PDF</a></td></tr>; })}</tbody></table>{campaigns.length === 0 && <div className="empty"><FileText size={20}/><b>No campaign reports yet</b><small>Create a campaign to generate its report.</small></div>}</div></>}
-      {section === "Accounts" && <div className="accounts-page"><div className="page-head accounts-head"><div><span className="account-eyebrow">CHANNEL SETUP</span><h2>WhatsApp Business Accounts</h2><p>Connect Meta senders with a 60-day token or Embedded Signup, or add QR (Baileys) senders that need no Meta approval.</p></div><div className="accounts-head-actions"><button className="btn btn-primary" onClick={() => { openQr(); setTokenForm(false); }}><QrCode size={15}/>Scan with QR</button><button className="btn" onClick={() => { setTokenMode("connect"); setTokenAccountId(""); setTokenAccountName(""); setTokenPhoneId(""); setTokenWabaId(""); setTokenForm(!tokenForm); }}><KeyRound size={15}/>{tokenForm && tokenMode === "connect" ? "Close Token Form" : "Connect with Token (60 Days)"}</button><button className="btn" disabled={busy || !metaSdkReady} onClick={startMetaSignup}><Plus size={15}/>{metaSdkReady ? "Connect with Meta Popup" : "Loading Meta popup…"}</button></div></div>
+      {section === "Accounts" && <div className="accounts-page"><div className="page-head accounts-head"><div><span className="account-eyebrow">CHANNEL SETUP</span><h2>WhatsApp Business Accounts</h2><p>Connect Meta senders with a 60-day token or Embedded Signup, or add QR (Baileys) senders that need no Meta approval.</p></div><div className="accounts-head-actions"><Pill tone={bridgeHealth === "online" ? "green" : bridgeHealth === "checking" ? "" : "red"}><span title="Self-hosted WhatsApp bridge reachable from Vercel">QR bridge {bridgeHealth}</span></Pill><button className="btn btn-primary" onClick={() => { openQr(); setTokenForm(false); }}><QrCode size={15}/>Scan with QR</button><button className="btn" onClick={() => { setTokenMode("connect"); setTokenAccountId(""); setTokenAccountName(""); setTokenPhoneId(""); setTokenWabaId(""); setTokenForm(!tokenForm); }}><KeyRound size={15}/>{tokenForm && tokenMode === "connect" ? "Close Token Form" : "Connect with Token (60 Days)"}</button><button className="btn" disabled={busy || !metaSdkReady} onClick={startMetaSignup}><Plus size={15}/>{metaSdkReady ? "Connect with Meta Popup" : "Loading Meta popup…"}</button></div></div>
       <div className="account-overview"><div className="account-stat"><span className="account-stat-icon"><Phone size={17}/></span><div><small>Connected numbers</small><b>{accounts.filter(a => a.status === "connected").length}</b></div></div><div className="account-stat"><span className="account-stat-icon"><ShieldCheck size={17}/></span><div><small>Ready to send</small><b>{accounts.filter(a => a.status === "connected" && (!a.tokenExpiresAt || new Date(a.tokenExpiresAt).getTime() > Date.now())).length}</b></div></div><div className="account-stat"><span className="account-stat-icon"><Activity size={17}/></span><div><small>Need attention</small><b>{accounts.filter(a => a.status !== "connected").length}</b></div></div></div>
       {tokenForm && (
         <form className="card form-card account-token-form" onSubmit={handleTokenSubmit}>
