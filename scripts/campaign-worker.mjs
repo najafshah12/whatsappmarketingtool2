@@ -79,7 +79,7 @@ async function tick() {
     }
     const results = Array.isArray(body.results) ? body.results : [];
     if (results.length === 0) {
-      console.log(`[${stamp()}] idle — no campaign is running or due`);
+      console.log(`[${stamp()}] idle - no campaign is running or due`);
       return;
     }
     for (const result of results) {
@@ -103,7 +103,7 @@ async function tick() {
   }
 }
 
-console.log(`Campaign worker → ${appUrl}`);
+console.log(`Campaign worker -> ${appUrl}`);
 console.log(`Tick every ${everySeconds}s. Press Ctrl+C to stop.\n`);
 
 while (running) await tick();

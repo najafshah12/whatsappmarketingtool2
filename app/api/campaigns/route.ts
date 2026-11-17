@@ -50,10 +50,13 @@ export async function POST(req: Request) {
     const allBridge = readyAccounts.length > 0 && readyAccounts.every(account => account.provider === "bridge");
     if (scheduledAt) {
       if (!template && !input.message.trim()) return NextResponse.json({ error: "Scheduled campaigns need a message or a template." }, { status: 409 });
-      if (template && template.status !== "approved" && !allBridge) return NextResponse.json({ error: "Scheduled campaigns need a Meta-approved template, or only QR (Baileys) senders." }, { status: 409 });
       // With no explicit assignment the sender loop uses every connected number.
-      const anyConnected = readyAccounts.length > 0 || (await prisma.whatsAppAccount.count({ where: { status: "connected" } })) > 0;
-      if (!anyConnected) return NextResponse.json({ error: "Connect at least one WhatsApp number before scheduling this campaign." }, { status: 409 });
+      const connectedPool = readyAccounts.length > 0
+        ? readyAccounts
+        : await prisma.whatsAppAccount.findMany({ where: { status: "connected" }, select: { provider: true } });
+      const poolAllBridge = connectedPool.length > 0 && connectedPool.every(account => account.provider === "bridge");
+      if (template && template.status !== "approved" && !(allBridge || poolAllBridge)) return NextResponse.json({ error: "Scheduled campaigns need a Meta-approved template, or only QR (Baileys) senders." }, { status: 409 });
+      if (connectedPool.length === 0) return NextResponse.json({ error: "Connect at least one WhatsApp number before scheduling this campaign." }, { status: 409 });
     }
 
     const selectedIds = group ? group.members.map(member => member.contactId) : input.contactIds;
