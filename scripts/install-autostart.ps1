@@ -4,8 +4,10 @@
 
 .DESCRIPTION
   Registers a scheduled task that runs scripts\start-all.ps1 at logon and every
-  10 minutes. The script is idempotent: healthy services are left alone, and a
-  dead bridge / tunnel / worker is restarted automatically.
+  3 minutes. The script is idempotent: healthy services are left alone, and a
+  dead bridge / revoked Cloudflare tunnel / stopped worker is restarted
+  automatically. A new tunnel URL is pushed to the deployed app immediately
+  (stored in the database), so no redeploy is needed.
 
   Install:  powershell -ExecutionPolicy Bypass -File .\scripts\install-autostart.ps1
   Remove:   powershell -ExecutionPolicy Bypass -File .\scripts\install-autostart.ps1 -Remove
@@ -28,11 +30,11 @@ $action = New-ScheduledTaskAction -Execute "powershell.exe" `
 
 $triggers = @(
   (New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME),
-  (New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(2) -RepetitionInterval (New-TimeSpan -Minutes 10))
+  (New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 3))
 )
 
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries `
-  -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 15)
+  -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 10)
 
 $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
 
@@ -42,5 +44,5 @@ Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $triggers -S
 
 Write-Host "Installed scheduled task '$taskName'."
 Write-Host "  - runs at logon"
-Write-Host "  - re-checks every 10 minutes"
+Write-Host "  - re-checks every 3 minutes"
 Write-Host "  - log: logs\stack.log"

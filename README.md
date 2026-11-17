@@ -23,8 +23,9 @@ Everything is started and self-healed by one script.
    `powershell -ExecutionPolicy Bypass -File .\scripts\start-all.ps1`). It starts
    the bridge, the tunnel and the campaign worker, and only fixes what is broken.
 2. **Auto-start** — `scripts\install-autostart.ps1` registers the scheduled task
-   `WhatsAppCRM-Stack`; it runs at logon and re-checks every 10 minutes, so a PC
-   restart or a dropped tunnel repairs itself.
+   `WhatsAppCRM-Stack`; it runs at logon and re-checks every 3 minutes, so a PC
+   restart or a revoked Cloudflare tunnel repairs itself. A new tunnel URL is
+   pushed straight into the app (stored in the database) — no redeploy.
 3. **Add numbers** — WhatsApp Accounts → *Scan with QR* → name, number, session
    (suggested automatically) → scan on the phone → *Add another number*.
 4. **Send** — Create Campaign → audience + message → set the delay → Send.

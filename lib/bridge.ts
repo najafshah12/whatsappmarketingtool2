@@ -8,6 +8,8 @@
  * error mapping and message rendering rules.
  */
 
+import { prisma } from "@/lib/prisma";
+
 export type BridgeSessionStatus = {
   sessionId: string;
   status: string;
@@ -29,11 +31,66 @@ export class BridgeApiError extends Error {
   }
 }
 
-export function bridgeConfig() {
-  const base = (process.env.WA_BRIDGE_URL || "").trim().replace(/\/+$/, "");
-  const key = (process.env.WA_BRIDGE_API_KEY || "").trim();
+/**
+ * Bridge location.
+ *
+ * A free Cloudflare quick tunnel changes its URL every time it is restarted or
+ * revoked, and Vercel only applies environment changes on a new deployment. So
+ * the live URL *and* the API key are also stored in the database: the tunnel
+ * watchdog posts them to /api/bridge/url and the next request uses them — no
+ * redeploy, no window where the dashboard points at a dead tunnel. The env vars
+ * stay as the fallback for a fresh database or a manual override.
+ */
+const BRIDGE_URL_KEY = "bridge.url";
+const BRIDGE_API_KEY_KEY = "bridge.key";
+const SETTINGS_CACHE_MS = 10_000;
+let cached: { base: string; key: string; at: number } | null = null;
+
+function cleanUrl(value: string) {
+  return (value || "").trim().replace(/\/+$/, "");
+}
+
+export function bridgeEnvUrl() {
+  return cleanUrl(process.env.WA_BRIDGE_URL || "");
+}
+
+export function bridgeEnvKey() {
+  return (process.env.WA_BRIDGE_API_KEY || "").trim();
+}
+
+export function invalidateBridgeUrlCache() {
+  cached = null;
+}
+
+/** Stored settings first, environment second. Never throws. */
+export async function bridgeConfig() {
+  if (cached && Date.now() - cached.at < SETTINGS_CACHE_MS) {
+    return { base: cached.base, key: cached.key, configured: cached.base.length > 0 && cached.key.length > 0 };
+  }
+  let base = bridgeEnvUrl();
+  let key = bridgeEnvKey();
+  try {
+    const rows = await prisma.setting.findMany({
+      where: { key: { in: [BRIDGE_URL_KEY, BRIDGE_API_KEY_KEY] } },
+      select: { key: true, value: true },
+    });
+    const storedUrl = cleanUrl(rows.find(row => row.key === BRIDGE_URL_KEY)?.value || "");
+    const storedKey = (rows.find(row => row.key === BRIDGE_API_KEY_KEY)?.value || "").trim();
+    if (/^https?:\/\/[^\s]+$/i.test(storedUrl)) base = storedUrl;
+    if (storedKey.length >= 8) key = storedKey;
+  } catch {
+    // Database hiccup: the environment fallback keeps the bridge reachable.
+  }
+  cached = { base, key, at: Date.now() };
   return { base, key, configured: base.length > 0 && key.length > 0 };
 }
+
+export async function bridgeBaseUrl() {
+  return (await bridgeConfig()).base;
+}
+
+export { BRIDGE_URL_KEY, BRIDGE_API_KEY_KEY };
+
 
 /**
  * Minimum gap between two bridge sends. WhatsApp bans numbers that receive
@@ -47,7 +104,7 @@ export function bridgeMinDelayMs() {
 }
 
 async function bridgeRequest<T>(path: string, init: RequestInit = {}, timeoutMs = 25000): Promise<T> {
-  const { base, key, configured } = bridgeConfig();
+  const { base, key, configured } = await bridgeConfig();
   if (!configured) {
     throw new BridgeApiError("WhatsApp bridge is not configured. Set WA_BRIDGE_URL and WA_BRIDGE_API_KEY on the server.", 503);
   }
@@ -112,7 +169,7 @@ export function bridgeQr(sessionId: string) {
  * The bridge answers with an HTML page, so the body is intentionally ignored.
  */
 export async function bridgeStartSession(sessionId: string) {
-  const { base, key, configured } = bridgeConfig();
+  const { base, key, configured } = await bridgeConfig();
   if (!configured) throw new BridgeApiError("WhatsApp bridge is not configured. Set WA_BRIDGE_URL and WA_BRIDGE_API_KEY on the server.", 503);
   const url = new URL(`${base}/session/add/${encodeURIComponent(sessionId)}`);
   url.searchParams.set("apiKey", key);

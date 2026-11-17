@@ -29,8 +29,10 @@ WA_BRIDGE_MIN_DELAY_MS=20000
 used server-side; the browser never sees it (the QR image is proxied through
 `/api/accounts/[id]/qr`).
 
-Changing an env var does **not** reach a deployment that already exists — redeploy
-after editing it.
+Changing an env var does **not** reach a deployment that already exists — but the
+bridge URL no longer depends on that: the live tunnel URL and key are stored in
+the database (`Setting` keys `bridge.url` / `bridge.key`) and pushed by the
+watchdog through `POST /api/bridge/url`. The env vars remain the fallback.
 
 ### Tunnel dropped? One command fixes it
 
@@ -38,13 +40,17 @@ Cloudflare quick tunnels have no uptime guarantee; they can be revoked after a f
 hours and the app then reports *"Could not reach the WhatsApp bridge server"*. Run:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\bridge-up.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\start-all.ps1
 ```
 
-It starts the bridge if needed, creates a fresh tunnel, verifies it, updates
-`WA_BRIDGE_URL` / `WA_BRIDGE_API_KEY` in Vercel (Production + Preview) and
-redeploys production. `GET /api/health` then shows `bridge: configured` and
-`bridgeReachable: yes`.
+It starts the bridge if needed, replaces a dead tunnel (HTTP/2 + IPv4, which is
+the stable path on most ISPs), verifies the URL, and publishes it to the app —
+**no redeploy, switched within a second**. `GET /api/bridge/url` shows the live
+URL, where it came from and whether it answers; `GET /api/health` shows
+`bridge: configured` and `bridgeReachable: yes`.
+
+The scheduled task `WhatsAppCRM-Stack` runs the same script every 3 minutes, so a
+revoked tunnel repairs itself without you noticing.
 
 Quick tunnels are fine for testing. For a stable URL, create a *named* tunnel in
 your Cloudflare account (free) and point `WA_BRIDGE_URL` at that hostname once.

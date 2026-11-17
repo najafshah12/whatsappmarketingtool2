@@ -34,6 +34,17 @@ $cacheFile = Join-Path $logDir "tunnel-url.txt"
 $appUrl = "https://whatsappmarketingtool-main.vercel.app"
 $apiKey = if ($env:WA_BRIDGE_API_KEY) { $env:WA_BRIDGE_API_KEY } else { "CHANGE_THIS_TO_YOUR_SECRET_KEY_786" }
 
+# WORKER_SECRET authenticates the local machine against the deployed app (the
+# campaign worker and the bridge-URL publish below share it).
+$workerSecret = ""
+$workerEnvFile = Join-Path $root ".env.worker"
+if (Test-Path $workerEnvFile) {
+  $workerLine = Select-String -Path $workerEnvFile -Pattern '^\s*WORKER_SECRET\s*=' | Select-Object -First 1
+  if ($workerLine) {
+    $workerSecret = ($workerLine.Line -replace '^\s*WORKER_SECRET\s*=\s*', '').Trim().Trim('"').Trim("'")
+  }
+}
+
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 
 function Say($message) { if (-not $Quiet) { Write-Host $message } }
@@ -84,23 +95,48 @@ try {
   }
 
   # ---------------------------------------------------------------- 2. tunnel
+  # cloudflared keeps retrying forever, but a revoked quick tunnel can never
+  # come back: the only fix is a new tunnel, which is what this section does.
   function Test-Tunnel([string]$url) {
     if (-not $url) { return $false }
     try {
-      return (Invoke-WebRequest -Uri "$url/sessions/status" -Headers @{ "x-api-key" = $apiKey } -UseBasicParsing -TimeoutSec 12).StatusCode -eq 200
+      $response = Invoke-WebRequest -Uri "$url/sessions/status" -Headers @{ "x-api-key" = $apiKey } -UseBasicParsing -TimeoutSec 12
+      if ($response.StatusCode -ne 200) { return $false }
+      # Cloudflare serves its own HTML error pages with a 200 in some cases.
+      $null = $response.Content | ConvertFrom-Json
+      return $true
     } catch { return $false }
   }
 
-  $cachedUrl = if (Test-Path $cacheFile) { (Get-Content $cacheFile -Raw).Trim() } else { "" }
+  # Tell the deployed app where the bridge is now. The URL is stored in the
+  # database, so this takes effect immediately - no Vercel redeploy needed.
+  function Publish-BridgeUrl([string]$url) {
+    if (-not $workerSecret) { return $false }
+    try {
+      $body = @{ url = $url; key = $apiKey } | ConvertTo-Json -Compress
+      $result = Invoke-RestMethod -Method Post -Uri "$appUrl/api/bridge/url" -Headers @{ Authorization = "Bearer $workerSecret" } -Body $body -ContentType "application/json" -TimeoutSec 45
+      Write-Log "app bridge URL published ($($result.reachable)): $url"
+      return ($result.reachable -eq "yes")
+    } catch {
+      Write-Log "app bridge URL publish failed: $($_.Exception.Message)"
+      return $false
+    }
+  }
+
+  $cachedUrl = if (Test-Path $cacheFile) { (Get-Content $cacheFile -Raw).Trim() } else ""
   $tunnelOk = Test-Tunnel $cachedUrl
-  if (-not $tunnelOk -and $cachedUrl) {
-    # Quick tunnels can stutter for a few seconds; confirm before replacing one.
-    Start-Sleep -Seconds 5
+  foreach ($wait in @(6, 10)) {
+    if ($tunnelOk) { break }
+    # Quick tunnels stutter for a few seconds; never replace a working one.
+    Start-Sleep -Seconds $wait
     $tunnelOk = Test-Tunnel $cachedUrl
   }
 
   if ($tunnelOk) {
     Say "tunnel   : running ($cachedUrl)"
+    if (-not (Publish-BridgeUrl $cachedUrl)) {
+      Say "app      : could not confirm the bridge URL - retrying next cycle"
+    }
   } else {
     Say "tunnel   : (re)starting ..."
     Get-Process cloudflared -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
@@ -108,8 +144,9 @@ try {
 
     $tunnelLog = Join-Path $logDir "tunnel.log"
     Remove-Item $tunnelLog -Force -ErrorAction SilentlyContinue
+    # HTTP/2 + IPv4: the QUIC/IPv6 path is what kept timing out on this network.
     Start-Process -FilePath $cloudflared `
-      -ArgumentList "tunnel", "--url", "http://localhost:3000", "--no-autoupdate" `
+      -ArgumentList "tunnel", "--url", "http://localhost:3000", "--no-autoupdate", "--protocol", "http2", "--edge-ip-version", "4" `
       -WorkingDirectory $tunnelDir -WindowStyle Hidden `
       -RedirectStandardError $tunnelLog -RedirectStandardOutput "$tunnelLog.out"
 
@@ -123,40 +160,43 @@ try {
     }
     if (-not $newUrl) { throw "cloudflared did not produce a URL. See logs\tunnel.log" }
 
-    $ready = $false
-    for ($i = 0; $i -lt 45; $i++) {
-      Start-Sleep -Seconds 3
-      if (Test-Tunnel $newUrl) { $ready = $true; break }
-    }
-    if (-not $ready) {
-      # DNS for a fresh quick tunnel can take a moment; do not throw the URL away.
-      Write-Log "new tunnel URL not answering yet: $newUrl"
-      Say "tunnel   : $newUrl (still warming up, keeping it)"
-    }
-
     Say "tunnel   : new URL $newUrl"
     Write-Log "tunnel restarted: $newUrl"
     [System.IO.File]::WriteAllText($cacheFile, $newUrl)
 
-    # Point Vercel at the new URL, then redeploy so the running build sees it.
-    if (Test-Path $vercel) {
-      Say "vercel   : updating WA_BRIDGE_URL ..."
+    $ready = $false
+    for ($i = 0; $i -lt 40; $i++) {
+      Start-Sleep -Seconds 3
+      if (Test-Tunnel $newUrl) { $ready = $true; break }
+    }
+    if (-not $ready) {
+      # DNS for a fresh quick tunnel can take a moment; keep the URL anyway and
+      # let the next 3-minute cycle confirm it.
+      Write-Log "new tunnel URL not answering yet: $newUrl"
+      Say "tunnel   : still warming up, keeping it"
+    }
+
+    $published = Publish-BridgeUrl $newUrl
+    if ($published) {
+      Say "app      : bridge URL switched live (no redeploy needed)"
+    } elseif (Test-Path $vercel) {
+      # Legacy fallback: only needed if the app endpoint itself is unreachable.
+      Say "app      : endpoint unreachable, updating Vercel env + redeploying ..."
       Push-Location $root
       try {
         foreach ($target in @("production", "preview")) {
           node $vercel env rm WA_BRIDGE_URL $target -y 2>&1 | Out-Null
           node $vercel env add WA_BRIDGE_URL $target --value "$newUrl" --type config --yes 2>&1 | Out-Null
         }
-        Say "vercel   : deploying (about a minute) ..."
         node $vercel deploy --prod --yes 2>&1 | Out-Null
         Write-Log "vercel env + deploy updated for $newUrl"
-        Say "vercel   : deploy ready"
+        Say "app      : deploy ready"
       } catch {
         Write-Log "vercel update failed: $($_.Exception.Message)"
-        Say "vercel   : update failed - run scripts\bridge-up.ps1 manually"
+        Say "app      : update failed - run scripts\start-all.ps1 again"
       } finally { Pop-Location }
     } else {
-      Say "vercel   : CLI not found, update WA_BRIDGE_URL manually: $newUrl"
+      Say "app      : set the URL manually: $newUrl"
     }
   }
 

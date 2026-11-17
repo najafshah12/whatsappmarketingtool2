@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { timingSafeEqual } from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { sendCampaignBatch } from "@/lib/campaign-sender";
+import { workerAuthorized } from "@/lib/worker-auth";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -10,22 +10,8 @@ const BATCH_SIZE = 10;
 // Leave headroom for the response inside the 60s serverless limit.
 const TIME_BUDGET_MS = 50_000;
 
-function authorized(req: Request) {
-  const supplied = req.headers.get("authorization") || "";
-  // CRON_SECRET is used by Vercel Cron; WORKER_SECRET lets the local worker
-  // machine keep campaigns moving between the once-a-day Hobby cron runs.
-  const secrets = [process.env.CRON_SECRET, process.env.WORKER_SECRET]
-    .map(secret => (secret || "").trim())
-    .filter(secret => secret.length >= 24);
-  const a = Buffer.from(supplied);
-  return secrets.some(secret => {
-    const b = Buffer.from(`Bearer ${secret}`);
-    return a.length === b.length && timingSafeEqual(a, b);
-  });
-}
-
 export async function GET(req: Request) {
-  if (!authorized(req)) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  if (!workerAuthorized(req)) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
 
   const now = new Date();
   const due = await prisma.campaign.findMany({

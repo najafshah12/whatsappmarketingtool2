@@ -26,7 +26,7 @@ export async function GET() {
 
   // QR (Baileys) bridge: a quick tunnel can drop without warning, so report
   // both whether the app is configured and whether the bridge answers right now.
-  const bridge = bridgeConfig();
+  const bridge = await bridgeConfig();
   if (!bridge.configured) {
     checks.bridge = "missing";
   } else {
