@@ -303,7 +303,7 @@ export default function Home() {
       {section === "Previous Campaign Records" && <><div className="page-head"><div><h2>Campaign Records</h2><p>Historical campaign data, dispatch logs, and delivery metrics.</p></div><button className="btn btn-primary" onClick={() => setSection("Create Campaign")}><Plus size={15}/>Create campaign</button></div><div className="card table-card"><CampaignTable campaigns={campaigns} onStatus={campaignStatus} onSend={sendCampaign} onDelete={deleteCampaign}/></div></>}
 
       {section === "Campaign Reports" && <><div className="page-head"><div><h2>Campaign Reports</h2><p>Download a recipient-by-recipient PDF with delivery, pending, skipped, and failure details.</p></div></div><div className="card table-card"><table className="table"><thead><tr><th>CAMPAIGN</th><th>STATUS</th><th>SUCCESS RATE</th><th>DELIVERED / READ</th><th>FAILED</th><th>RECIPIENTS</th><th>REPORT</th></tr></thead><tbody>{campaigns.map(c => { const success = c.total ? Math.round((c.delivered / c.total) * 100) : 0; return <tr key={c.id}><td><b>{c.name}</b><small>{date(c.createdAt)}</small></td><td><Pill>{c.status}</Pill></td><td>{success}%</td><td>{c.delivered.toLocaleString()}</td><td className="error-text">{c.failed.toLocaleString()}</td><td>{c.total.toLocaleString()}</td><td><a className="btn btn-small" href={`/api/campaigns/${c.id}/report`}><FileText size={14}/>Download PDF</a></td></tr>; })}</tbody></table>{campaigns.length === 0 && <div className="empty"><FileText size={20}/><b>No campaign reports yet</b><small>Create a campaign to generate its report.</small></div>}</div></>}
-      {section === "Accounts" && <div className="accounts-page"><div className="page-head accounts-head"><div><span className="account-eyebrow">CHANNEL SETUP</span><h2>WhatsApp Business Accounts</h2><p>Connect Meta senders with a 60-day token or Embedded Signup, or add QR (Baileys) senders that need no Meta approval.</p></div><div className="accounts-head-actions"><Pill tone={bridgeHealth === "online" ? "green" : bridgeHealth === "checking" ? "" : "red"}><span title="Self-hosted WhatsApp bridge reachable from Vercel">QR bridge {bridgeHealth}</span></Pill><button className="btn btn-primary" onClick={() => { openQr(); setTokenForm(false); }}><QrCode size={15}/>Scan with QR</button><button className="btn" onClick={() => { setTokenMode("connect"); setTokenAccountId(""); setTokenAccountName(""); setTokenPhoneId(""); setTokenWabaId(""); setTokenForm(!tokenForm); }}><KeyRound size={15}/>{tokenForm && tokenMode === "connect" ? "Close Token Form" : "Connect with Token (60 Days)"}</button><button className="btn" disabled={busy || !metaSdkReady} onClick={startMetaSignup}><Plus size={15}/>{metaSdkReady ? "Connect with Meta Popup" : "Loading Meta popup…"}</button></div></div>
+      {section === "Accounts" && <div className="accounts-page"><div className="page-head accounts-head"><div><span className="account-eyebrow">CHANNEL SETUP</span><h2>WhatsApp Business Accounts</h2><p>Connect Meta senders with a 60-day token or Embedded Signup, or add QR (Baileys) senders that need no Meta approval.</p></div><div className="accounts-head-actions"><Pill tone={bridgeHealth === "online" ? "green" : bridgeHealth === "checking" ? "" : "red"}><span title="Self-hosted WhatsApp bridge reachable from Vercel">QR bridge {bridgeHealth}</span></Pill><button className="btn btn-primary" onClick={() => { openQr(); setTokenForm(false); }} title="Add another WhatsApp number with a QR scan — no Meta approval needed"><Plus size={15}/>Add account</button><button className="btn" onClick={() => { setTokenMode("connect"); setTokenAccountId(""); setTokenAccountName(""); setTokenPhoneId(""); setTokenWabaId(""); setTokenForm(!tokenForm); }}><KeyRound size={15}/>{tokenForm && tokenMode === "connect" ? "Close Token Form" : "Connect with Token (60 Days)"}</button><button className="btn" disabled={busy || !metaSdkReady} onClick={startMetaSignup}><Plus size={15}/>{metaSdkReady ? "Connect with Meta Popup" : "Loading Meta popup…"}</button></div></div>
       <div className="account-overview"><div className="account-stat"><span className="account-stat-icon"><Phone size={17}/></span><div><small>Connected numbers</small><b>{accounts.filter(a => a.status === "connected").length}</b></div></div><div className="account-stat"><span className="account-stat-icon"><ShieldCheck size={17}/></span><div><small>Ready to send</small><b>{accounts.filter(a => a.status === "connected" && (!a.tokenExpiresAt || new Date(a.tokenExpiresAt).getTime() > Date.now())).length}</b></div></div><div className="account-stat"><span className="account-stat-icon"><Activity size={17}/></span><div><small>Need attention</small><b>{accounts.filter(a => a.status !== "connected").length}</b></div></div></div>
       {tokenForm && (
         <form className="card form-card account-token-form" onSubmit={handleTokenSubmit}>
@@ -344,16 +344,14 @@ export default function Home() {
           </div>
         </form>
       )}
-      <div className={`notice account-notice ${metaConfig?.enabled ? "" : "warn"}`}>{metaConfig?.enabled ? "Meta App credentials (META_APP_ID & META_APP_SECRET) are active on the server. Tokens will automatically be exchanged for 60-day validity." : `Meta server settings missing: ${metaConfig?.missing.join(", ") || "configuration"}. Add them in Vercel to enable 60-day token exchange.`}</div>
-      <div className="notice warn account-notice"><AlertTriangle size={16}/>Send only to contacts who explicitly opted in. Meta senders require approved templates; QR (Baileys) senders send plain text but carry a real WhatsApp ban risk — keep the delays.</div>
-      <div className="card account-setup-card">
-        <div className="card-head">
-          <div>
-            <h3>Meta setup checklist</h3>
-            <p>Everything Meta needs before a real campaign can leave WhatsApp.</p>
-          </div>
+      <details className="card account-setup-card meta-setup">
+        <summary className="setup-summary">
+          <span>
+            <b>Meta setup checklist</b>
+            <small>Optional — only for Cloud API senders.</small>
+          </span>
           <Pill tone={metaConfig?.enabled ? "green" : "yellow"}>{metaConfig?.enabled ? "App credentials active" : "App credentials missing"}</Pill>
-        </div>
+        </summary>
         <div className="form-grid">
           <Field label="Webhook callback URL (Meta → WhatsApp → Configuration)">
             <input readOnly value={origin ? `${origin}/api/webhook` : "Loading…"} onFocus={e => e.currentTarget.select()} />
@@ -368,27 +366,14 @@ export default function Home() {
           <a className="btn btn-small" href={`https://developers.facebook.com/apps/${metaConfig?.appId || ""}/whatsapp-business/wa-settings/`} target="_blank" rel="noreferrer">App WhatsApp settings</a>
           <a className="btn btn-small" href={`https://developers.facebook.com/tools/explorer/${metaConfig?.appId || ""}/`} target="_blank" rel="noreferrer"><KeyRound size={13}/>Get access token</a>
         </div>
-        <p className="help account-setup-note">
-          Meta&apos;s shared Test WABA only holds its demo number — a Pakistani number must be added to your own WhatsApp Business Account, verified by SMS or voice call, and the Meta app must be in Live mode before customer messages are delivered.
-        </p>
-      </div>
+      </details>
       <div className="account-grid account-grid-polished">{accounts.map(a => {
         const isBridge = a.provider === "bridge";
         let tokenBadge = null;
         let expired = a.status === "expired" && !isBridge;
-        if (!isBridge && (a.status === "connected" || expired)) {
-          if (!a.tokenExpiresAt && !expired) {
-            tokenBadge = <p className="help" style={{ color: "#16a34a", fontWeight: "bold" }}>✓ Permanent System User Token</p>;
-          } else {
-            const ms = a.tokenExpiresAt ? new Date(a.tokenExpiresAt).getTime() - Date.now() : 0;
-            const days = Math.ceil(ms / (1000 * 60 * 60 * 24));
-            if (!expired && days > 0) {
-              tokenBadge = <p className="help" style={{ color: "#16a34a", fontWeight: "bold" }}>✓ 60-day token active ({days} days remaining)</p>;
-            } else {
-              expired = true;
-              tokenBadge = <p className="help" style={{ color: "#dc2626", fontWeight: "bold" }}>⚠️ Token expired — paste a fresh token with Update Token</p>;
-            }
-          }
+        if (!isBridge && a.tokenExpiresAt && new Date(a.tokenExpiresAt).getTime() <= Date.now()) {
+          expired = true;
+          tokenBadge = <p className="help" style={{ color: "#dc2626", fontWeight: "bold" }}>Token expired — use Update Token</p>;
         }
         return (
           <article className="card sender-card" key={a.id}>
@@ -407,7 +392,6 @@ export default function Home() {
               <b>{a._count?.campaignAssignments ?? campaigns.filter(c => c.accountAssignments?.some(x => x.account.id === a.id)).length}</b>
             </div>
             {tokenBadge}
-            {(a.status === "connected" || a.status === "expired") && !isBridge && <p className="help">{a.webhookSubscribedAt ? "Webhooks subscribed" : "Webhooks: auto-subscribed or pending"}</p>}
             <div className="sender-actions">
               {a.status === "connected" && (
                 <button className="btn btn-small btn-primary sender-send" onClick={() => setMessageModal(a)} title={`Write and send a message from ${a.name}`}>
@@ -419,7 +403,6 @@ export default function Home() {
                   <QrCode size={13}/>{a.status === "connected" ? "Session QR" : "Scan QR"}
                 </button>
               )}
-              {isBridge && a.status !== "connected" && <p className="help">Not linked yet — scan the QR from the phone that owns this number.</p>}
               {(a.status === "connected" || a.status === "expired") && (
                 <button className="btn btn-small" disabled={verifyingId === a.id} onClick={() => void verifyAccount(a)} title={isBridge ? "Ask the WhatsApp bridge whether this session is still connected" : "Ask Meta whether this number can send right now"}>
                   <RefreshCw size={13}/>{verifyingId === a.id ? "Checking…" : "Check Connection"}
@@ -451,7 +434,7 @@ export default function Home() {
             </div>
           </article>
         );
-      })}</div>
+      })}{accounts.length > 0 && <button type="button" className="add-account-tile" onClick={() => { setTokenForm(false); openQr(); }}><span className="add-account-icon"><Plus size={20}/></span><b>Add another account</b><small>Scan a QR from the next phone — no Meta approval.</small></button>}</div>
       {accounts.length === 0 && <Empty icon={Phone} title="No sender accounts connected" detail="Use 'Scan with QR' for a number that sends immediately, or 'Connect with Token' / 'Connect with Meta Popup' for the official Cloud API."/>}</div>}
 
       {section === "Create Campaign" && <><div className="page-head"><div><h2>Create Campaign</h2><p>Choose a consented audience, a message, and the numbers to send from. Messages loop through every connected number, and you decide the delay.</p></div><Pill tone="pink">Campaign workspace</Pill></div><form className="card campaign-form" onSubmit={createCampaign}><div className="campaign-columns"><div><Field label="Campaign name"><input name="name" required placeholder="e.g. September update" defaultValue={`Campaign ${new Date().toLocaleDateString()}`}/></Field><Field label="Audience pool"><select name="groupId"><option value="">All opted-in contacts ({audience?.eligible ?? 0})</option>{groups.map(g => <option key={g.id} value={g.id}>{g.name} ({g._count.members})</option>)}</select></Field><Field label="Choose contacts (leave empty for all opted-in contacts)"><select name="contactIds" multiple size={5}>{contacts.filter(c => c.marketingOptIn && !c.optedOut).map(c => <option key={c.id} value={c.id}>{c.name} · {c.phone}</option>)}</select></Field><Field label="WhatsApp template"><select name="templateId" defaultValue=""><option value="">Save as draft without a template</option>{templates.map(t => <option key={t.id} value={t.id}>{t.name} · {t.status.toUpperCase()}</option>)}</select></Field><Field label="Optional internal note"><textarea name="message" maxLength={4096} placeholder="Optional note for your campaign record"/></Field><Field label="Delay between messages (seconds)"><input name="delaySeconds" type="number" min="1" max="3600" defaultValue="20"/></Field><p className="help">Messages loop through your connected numbers automatically. QR senders always keep at least 20 seconds between messages, even if you type a smaller number.</p><Field label="Schedule (optional)"><input name="scheduledAt" type="datetime-local" min={new Date().toISOString().slice(0, 16)}/></Field><p className="help">Scheduled sends need an approved Meta template (or only QR senders), a connected sender assigned to it, and recorded opt-in consent. Drafts never send automatically.</p></div><div className="assigned-box"><h3>Assigned accounts</h3><p className="help">Tick the numbers to use, or leave all unticked to loop through every connected number.</p>{accounts.length ? accounts.map(a => <label className="check-row" key={a.id}><input name="accountIds" type="checkbox" value={a.id}/><span><b>{a.name}</b><small>{a.phone} · {a.status}</small></span><Pill tone={a.status === "connected" ? "green" : "yellow"}>{a.status}</Pill></label>) : <div className="empty compact"><Phone size={18}/><b>No sender accounts</b><small>Connect one with Meta before sending.</small></div>}<button type="button" className="btn btn-small" onClick={() => setSection("Accounts")}><Plus size={13}/>Manage accounts</button></div></div><div className="form-actions"><span className="help">Only current, explicit marketing opt-ins are included.</span><button className="btn btn-primary" disabled={busy}>{busy ? <LoaderCircle size={14}/> : <Check size={14}/>}Save campaign</button></div></form></>}

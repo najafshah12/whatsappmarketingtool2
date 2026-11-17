@@ -70,7 +70,7 @@ export default function SendMessage({ account, onClose, onSent }: Props) {
           <div className="qr-head-copy">
             <span className="eyebrow">{isBridge ? "QR SENDER" : "WHATSAPP CLOUD API"}</span>
             <h2 id="message-dialog-title">Message from {account.name}</h2>
-            <p>{account.phone}{account.bridgeSessionId ? ` · session ${account.bridgeSessionId}` : ""} · {account.status}</p>
+            <p>{account.phone} · {account.status}</p>
           </div>
           <button type="button" className="icon-btn qr-close" onClick={onClose} aria-label="Close"><X size={17} /></button>
         </header>
@@ -86,7 +86,6 @@ export default function SendMessage({ account, onClose, onSent }: Props) {
               autoFocus
               required
             />
-            <small className="help">Country code ke sath, sirf digits — maslan +923001234567.</small>
           </label>
 
           <label className="field">
@@ -99,14 +98,10 @@ export default function SendMessage({ account, onClose, onSent }: Props) {
               rows={6}
               required
             />
-            <small className="help">{text.length}/4096 characters · type the message exactly as the recipient should read it.</small>
+            <small className="help">{text.length}/4096</small>
           </label>
 
-          <p className="help">
-            {isBridge
-              ? "Yeh message foran scanned number se jayega — koi template ya Meta approval nahi chahiye."
-              : "Meta free text sirf 24 ghante ke reply window mein allow karta hai; us ke baad approved template chahiye."}
-          </p>
+          {!isBridge && <p className="help">Meta free text sirf 24-ghante ke reply window mein allow karta hai; us ke baad approved template chahiye.</p>}
 
           {error && <p className="qr-alert"><AlertTriangle size={14} />{error}</p>}
           {sent && <p className="msg-success"><CheckCircle2 size={15} /><span>{sent}</span></p>}

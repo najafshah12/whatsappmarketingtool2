@@ -410,3 +410,29 @@ html,body{
 @media(max-width:760px){
   .msg-form{padding:16px}
 }
+
+/* ---------- add-another-account tile ---------- */
+.add-account-tile{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;
+  min-height:196px;padding:22px;border-radius:19px;
+  border:1.5px dashed #bcd9de;background:#f7fcfd;color:#2f7a86;
+  text-align:center;transition:transform .16s ease,border-color .16s ease,background .16s ease;
+}
+.add-account-tile:hover{border-color:#4eacb8;background:#eef9fb;transform:translateY(-2px)}
+.add-account-tile b{font-size:12px;color:#1f5061;font-weight:750}
+.add-account-tile small{font-size:10px;color:#7d94a3;line-height:1.5;max-width:190px}
+.add-account-icon{
+  width:40px;height:40px;border-radius:14px;display:grid;place-items:center;
+  background:#e2f3f4;color:#168a97;border:1px solid #cbe8ea;
+}
+
+/* ---------- collapsible Meta checklist ---------- */
+.meta-setup .setup-summary{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:16px 20px;cursor:pointer;list-style:none;
+}
+.meta-setup .setup-summary::-webkit-details-marker{display:none}
+.meta-setup .setup-summary b{display:block;font-size:14px;color:#203f54}
+.meta-setup .setup-summary small{display:block;margin-top:4px;color:#7a8fa2;font-size:10px}
+.meta-setup[open] .setup-summary{border-bottom:1px solid #e9f0f3;background:#f8fbfd}
+.meta-setup .account-setup-links{padding:0 20px}
