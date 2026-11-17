@@ -123,7 +123,7 @@ try {
     }
   }
 
-  $cachedUrl = if (Test-Path $cacheFile) { (Get-Content $cacheFile -Raw).Trim() } else ""
+  $cachedUrl = if (Test-Path $cacheFile) { (Get-Content $cacheFile -Raw).Trim() } else { "" }
   $tunnelOk = Test-Tunnel $cachedUrl
   foreach ($wait in @(6, 10)) {
     if ($tunnelOk) { break }
@@ -134,7 +134,9 @@ try {
 
   if ($tunnelOk) {
     Say "tunnel   : running ($cachedUrl)"
-    if (-not (Publish-BridgeUrl $cachedUrl)) {
+    if (Publish-BridgeUrl $cachedUrl) {
+      Say "app      : bridge URL confirmed"
+    } else {
       Say "app      : could not confirm the bridge URL - retrying next cycle"
     }
   } else {
