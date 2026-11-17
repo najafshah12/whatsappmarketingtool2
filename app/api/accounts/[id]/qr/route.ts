@@ -21,10 +21,12 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
     }
 
     let state = await bridgeQr(account.bridgeSessionId);
-    if (state.status === "not_started") {
+    // A brand new session, or one that dropped / was logged out on the phone,
+    // needs the bridge to (re)open a socket before it can emit a QR.
+    if (state.status === "not_started" || state.status === "disconnected") {
       await bridgeStartSession(account.bridgeSessionId);
       // The bridge needs a moment to open the socket and emit the first QR.
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      await new Promise(resolve => setTimeout(resolve, 2500));
       state = await bridgeQr(account.bridgeSessionId);
     }
 
