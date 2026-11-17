@@ -29,21 +29,21 @@ export async function sendCampaignBatch(campaignId: string, batchSize = 10) {
     item => item.status === "connected" && item.phoneNumberId && (item.accessTokenEncrypted || process.env.WA_ACCESS_TOKEN)
   );
 
-  const account =
-    assignedAccounts.find(item => item.id === campaign.template?.accountId) ||
-    assignedAccounts[0];
+  const primaryAccount = assignedAccounts.find(item => item.id === campaign.template?.accountId) || assignedAccounts[0];
+  const accounts = campaign.rotationIntervalSeconds > 0 ? assignedAccounts : primaryAccount ? [primaryAccount] : [];
 
-  if (!account) {
+  if (accounts.length === 0) {
     const expiredAccount = campaign.accountAssignments.map(item => item.account).find(item => item.status === "expired");
     if (expiredAccount) {
       throw new Error(`The WhatsApp access token for "${expiredAccount.name}" has expired. Open WhatsApp Accounts → Update Token and paste a fresh token.`);
     }
     throw new Error("Assign a connected sender with a valid WhatsApp number to this campaign.");
   }
-  if (account.tokenExpiresAt && account.tokenExpiresAt.getTime() <= Date.now()) {
-    throw new Error(`The WhatsApp access token for "${account.name}" has expired (${account.tokenExpiresAt.toLocaleDateString()}). Please update the token in the Accounts section.`);
+  const expired = accounts.find(account => account.tokenExpiresAt && account.tokenExpiresAt.getTime() <= Date.now());
+  if (expired) {
+    throw new Error(`The WhatsApp access token for "${expired.name}" has expired. Please update it in Accounts.`);
   }
-  accountAccessToken(account);
+  accounts.forEach(accountAccessToken);
 
   await prisma.message.updateMany({
     where: { campaignId, status: "queued", OR: [{ contact: { is: { optedOut: true } } }, { contact: { is: { marketingOptIn: false } } }] },
@@ -68,12 +68,21 @@ export async function sendCampaignBatch(campaignId: string, batchSize = 10) {
     throw new Error("No consented, queued recipients remain in this campaign.");
   }
 
+  const order = await prisma.message.findMany({ where: { campaignId }, orderBy: { createdAt: "asc" }, select: { id: true } });
+  const ordinal = new Map(order.map((item, index) => [item.id, index]));
+  const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
   let sent = 0;
   let failed = 0;
+  let lastAttemptAt = 0;
   for (const message of queued) {
     const claim = await prisma.message.updateMany({ where: { id: message.id, status: "queued" }, data: { status: "sending", error: null } });
     if (claim.count !== 1) continue;
     try {
+      const intervalMs = campaign.rotationIntervalSeconds * 1000;
+      if (intervalMs > 0 && lastAttemptAt > 0) await wait(Math.max(0, intervalMs - (Date.now() - lastAttemptAt)));
+      const account = accounts[(ordinal.get(message.id) ?? 0) % accounts.length];
+      accountAccessToken(account);
+      lastAttemptAt = Date.now();
       const components = templateParameters(campaign.template.body, message.contact);
       const result = await sendCloudMessage<CloudSendResponse>(account, {
         to: phoneForWhatsAppApi(message.contact.phone),
