@@ -29,9 +29,8 @@ export async function sendCampaignBatch(campaignId: string, batchSize = 10) {
     item => item.status === "connected" && item.phoneNumberId && (item.accessTokenEncrypted || process.env.WA_ACCESS_TOKEN)
   );
 
-  const accounts = campaign.rotationIntervalSeconds > 0
-    ? assignedAccounts
-    : [assignedAccounts.find(item => item.id === campaign.template?.accountId) || assignedAccounts[0]];
+  const primaryAccount = assignedAccounts.find(item => item.id === campaign.template?.accountId) || assignedAccounts[0];
+  const accounts = campaign.rotationIntervalSeconds > 0 ? assignedAccounts : primaryAccount ? [primaryAccount] : [];
 
   if (accounts.length === 0) {
     const expiredAccount = campaign.accountAssignments.map(item => item.account).find(item => item.status === "expired");
