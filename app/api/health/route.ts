@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getMetaAppConfig, isUsableMetaAppId, isUsableMetaAppSecret } from "@/lib/whatsapp";
+import { bridgeConfig } from "@/lib/bridge";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 10;
@@ -22,6 +23,26 @@ export async function GET() {
 
   const meta = getMetaAppConfig();
   checks.meta = isUsableMetaAppId(meta.appId) && isUsableMetaAppSecret(meta.appSecret) ? "configured" : "invalid";
+
+  // QR (Baileys) bridge: a quick tunnel can drop without warning, so report
+  // both whether the app is configured and whether the bridge answers right now.
+  const bridge = bridgeConfig();
+  if (!bridge.configured) {
+    checks.bridge = "missing";
+  } else {
+    checks.bridge = "configured";
+    try {
+      const response = await fetch(`${bridge.base}/sessions/status`, {
+        headers: { "x-api-key": bridge.key },
+        cache: "no-store",
+        signal: AbortSignal.timeout(4000),
+      });
+      checks.bridgeReachable = response.ok ? "yes" : `http-${response.status}`;
+    } catch {
+      checks.bridgeReachable = "no";
+    }
+  }
+
   checks.scheduledSender = (process.env.CRON_SECRET?.trim().length || 0) >= 32 ? "configured" : "missing";
   checks.tokenEncryption = (process.env.WA_TOKEN_ENCRYPTION_KEY || process.env.AUTH_SESSION_SECRET || "").length >= 32 ? "configured" : "missing";
 

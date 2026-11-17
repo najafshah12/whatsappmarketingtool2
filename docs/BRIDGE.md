@@ -29,6 +29,26 @@ WA_BRIDGE_MIN_DELAY_MS=20000
 used server-side; the browser never sees it (the QR image is proxied through
 `/api/accounts/[id]/qr`).
 
+Changing an env var does **not** reach a deployment that already exists — redeploy
+after editing it.
+
+### Tunnel dropped? One command fixes it
+
+Cloudflare quick tunnels have no uptime guarantee; they can be revoked after a few
+hours and the app then reports *"Could not reach the WhatsApp bridge server"*. Run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\bridge-up.ps1
+```
+
+It starts the bridge if needed, creates a fresh tunnel, verifies it, updates
+`WA_BRIDGE_URL` / `WA_BRIDGE_API_KEY` in Vercel (Production + Preview) and
+redeploys production. `GET /api/health` then shows `bridge: configured` and
+`bridgeReachable: yes`.
+
+Quick tunnels are fine for testing. For a stable URL, create a *named* tunnel in
+your Cloudflare account (free) and point `WA_BRIDGE_URL` at that hostname once.
+
 ## 2. Database
 
 ```bash
