@@ -42,6 +42,7 @@ model Campaign {
   id                 String            @id @default(cuid())
   name               String
   message            String
+  rotationIntervalSeconds Int          @default(0)
   status             String            @default("draft")
   scheduledAt        DateTime?
   sentAt             DateTime?
