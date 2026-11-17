@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { apiError } from "@/lib/api";
@@ -55,6 +56,15 @@ export async function POST(req: Request) {
     return NextResponse.json(account, { status: 201 });
   }
   catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      const target = String((error.meta as { target?: unknown } | undefined)?.target ?? "");
+      if (target.includes("bridgeSessionId")) {
+        return NextResponse.json({ error: "That bridge session name is already used by another sender. Use the suggested name (account1, account2, …)." }, { status: 409 });
+      }
+      if (target.includes("phone")) {
+        return NextResponse.json({ error: "This WhatsApp number is already added. Open that sender and scan its QR instead of adding it twice." }, { status: 409 });
+      }
+    }
     if (error instanceof z.ZodError) return NextResponse.json({ error: error.issues[0]?.message }, { status: 400 });
     return apiError(error);
   }

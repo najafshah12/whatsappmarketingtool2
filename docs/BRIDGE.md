@@ -61,26 +61,46 @@ Migration `20261116090000_bridge_provider` adds `provider` (`meta` | `bridge`) a
 
 ## 3. Connect a number
 
-1. Accounts → **Add QR Sender (Baileys)**.
+1. Accounts → **Scan with QR**.
 2. Name, the WhatsApp number, and a session name (`account1`, `account2`, …).
-3. The QR panel opens and refreshes every 3 seconds.
+3. The dialog opens and refreshes the QR every 3 seconds.
 4. Phone: WhatsApp → Linked Devices → Link a Device.
-5. The panel flips to "Connected" and the card shows **qr connected**. The number
-   is read from the bridge and saved on the account.
+5. The dialog flips to "Linked", the card shows the connected status and the
+   number is read from the bridge and saved on the account.
+6. **Add number** lets you chain the next scan without closing the dialog.
 
-One session name per number. The bridge keeps the session on disk, so it survives
-restarts; deleting the session folder, logging out from the phone, or losing the
-phone's WhatsApp login requires a fresh QR scan.
+One session name per number (the database rejects duplicates). The bridge keeps
+the session on disk, so it survives restarts; deleting the session folder,
+logging out from the phone, or losing the phone's WhatsApp login requires a fresh
+QR scan.
 
 ## 4. Sending
 
-- Campaign → pick the QR sender(s) under **Assigned accounts** (rotate senders
-  works for QR senders too).
+- Campaign → pick numbers under **Assigned accounts**, or leave every checkbox
+  empty to use **every connected number**.
+- Messages **loop through the pool**: message 1 from the first number, message 2
+  from the second, and so on. The order is the campaign's recipient order, so a
+  rerun continues where it stopped.
+- The delay is set per campaign ("Delay between messages (seconds)"). QR senders
+  keep a 20s gap **per number**: with 6 numbers a 3s delay gives every number a
+  full 20s rest. Jitter of up to 30% is added on top.
 - The template body is rendered as text: `{{1}}` name, `{{2}}` phone, `{{3}}`
   email (named `{{name}}`, `{{phone}}`, `{{email}}` also work).
 - If the campaign has no template, the campaign note/message is sent as-is.
-- QR sends are never faster than `WA_BRIDGE_MIN_DELAY_MS` (default 20s) plus up to
-  30% jitter, even if the campaign interval is shorter.
+
+### Running without the dashboard open
+
+Vercel's free cron runs once a day, so a long campaign needs a tick from
+somewhere. Either keep the dashboard tab open, or run the worker on the machine
+that already runs the bridge:
+
+```powershell
+node scripts\campaign-worker.mjs
+```
+
+It calls `/api/cron/campaigns` every 25 seconds with `WORKER_SECRET` (stored in
+`.env.worker`). Started campaigns keep sending at the configured delay until they
+finish; `Ctrl+C` stops the worker.
 
 ### Statuses written per message
 

@@ -7,6 +7,7 @@ import {
   CircleHelp,
   Link2,
   LoaderCircle,
+  Plus,
   QrCode,
   RefreshCw,
   ScanLine,
@@ -33,6 +34,8 @@ type QrPayload = {
 type Props = {
   /** Existing QR sender to (re)connect. Omit to create a new one first. */
   account?: QrSender | null;
+  /** Session names already used, so the next number gets a free one. */
+  takenSessions?: string[];
   /** Called after a new sender record is created. */
   onSaved?: (account: QrSender) => void | Promise<void>;
   /** Called once the phone finishes linking, so the parent can refresh data. */
@@ -46,7 +49,7 @@ const STEPS = [
   { icon: ScanLine, title: "Link a device, then scan this code", detail: "Keep this window open until the status turns green." },
 ];
 
-export default function QrConnect({ account, onSaved, onConnected, onClose }: Props) {
+export default function QrConnect({ account, takenSessions, onSaved, onConnected, onClose }: Props) {
   const [sender, setSender] = useState<QrSender | null>(account || null);
   const [state, setState] = useState<QrPayload | null>(null);
   const [error, setError] = useState("");
@@ -54,6 +57,15 @@ export default function QrConnect({ account, onSaved, onConnected, onClose }: Pr
   const [retry, setRetry] = useState(0);
   const [seconds, setSeconds] = useState(3);
   const connectedRef = useRef(false);
+  // Next free session name, so adding several numbers stays predictable.
+  const nextSession = useCallback((extra?: string | null) => {
+    const used = new Set((takenSessions || []).map(item => item.toLowerCase()));
+    if (extra) used.add(extra.toLowerCase());
+    let n = 1;
+    while (used.has(`account${n}`)) n += 1;
+    return `account${n}`;
+  }, [takenSessions]);
+  const [sessionHint, setSessionHint] = useState(() => nextSession());
   // Keep the latest callback without re-running the polling effect on every parent render.
   const onConnectedRef = useRef(onConnected);
   useEffect(() => { onConnectedRef.current = onConnected; }, [onConnected]);
@@ -131,6 +143,7 @@ export default function QrConnect({ account, onSaved, onConnected, onClose }: Pr
       setSender(body as QrSender);
       connectedRef.current = false;
       setState(null);
+      setSessionHint(nextSession((body as QrSender).bridgeSessionId));
       await onSaved?.(body as QrSender);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not add the QR sender.");
@@ -140,6 +153,17 @@ export default function QrConnect({ account, onSaved, onConnected, onClose }: Pr
   };
 
   const refreshNow = useCallback(() => { setError(""); setState(null); setRetry(value => value + 1); }, []);
+
+  // Keep the dialog open and jump straight to the next number's form.
+  const addAnother = () => {
+    setSessionHint(nextSession(sender?.bridgeSessionId));
+    setSender(null);
+    setState(null);
+    setError("");
+    setRetry(0);
+    setSeconds(3);
+    connectedRef.current = false;
+  };
 
   const bridgeStatus = state?.bridgeStatus || "starting";
   const sessionId = state?.sessionId || sender?.bridgeSessionId || "—";
@@ -178,8 +202,8 @@ export default function QrConnect({ account, onSaved, onConnected, onClose }: Pr
               </label>
               <label className="field qr-form-wide">
                 <span>Bridge session name</span>
-                <input name="bridgeSessionId" required pattern="[a-zA-Z0-9_-]{2,40}" placeholder="account1" defaultValue={`account${Math.floor(Math.random() * 900) + 100}`} />
-                <small className="help">Only letters, numbers, <code>-</code> and <code>_</code>. One session per number.</small>
+                <input key={sessionHint} name="bridgeSessionId" required pattern="[a-zA-Z0-9_-]{2,40}" placeholder="account1" defaultValue={sessionHint} />
+                <small className="help">Only letters, numbers, <code>-</code> and <code>_</code>. One session per number — after the scan, tap “Add another number” to keep going.</small>
               </label>
             </div>
             {error && <p className="qr-alert"><AlertTriangle size={15} />{error}</p>}
@@ -245,13 +269,25 @@ export default function QrConnect({ account, onSaved, onConnected, onClose }: Pr
                 <div><small>Bridge</small><b className={`qr-bridge ${tone}`}>{bridgeStatus.replace(/_/g, " ")}</b></div>
               </div>
 
+              {connected && (
+                <div className="qr-next">
+                  <CheckCircle2 size={15} />
+                  <span><b>Number ready.</b> Connect the next phone to grow the sender pool.</span>
+                </div>
+              )}
+
               <div className="qr-actions">
-                <button type="button" className="btn" onClick={refreshNow} disabled={connected}>
-                  <RefreshCw size={14} />New QR
-                </button>
-                <button type="button" className="btn btn-primary" onClick={onClose}>
-                  {connected ? "Done" : "Close"}
-                </button>
+                {connected ? (
+                  <>
+                    <button type="button" className="btn" onClick={addAnother}><Plus size={14} />Add another number</button>
+                    <button type="button" className="btn btn-primary" onClick={onClose}>Done</button>
+                  </>
+                ) : (
+                  <>
+                    <button type="button" className="btn" onClick={refreshNow}><RefreshCw size={14} />New QR</button>
+                    <button type="button" className="btn btn-primary" onClick={onClose}>Close</button>
+                  </>
+                )}
               </div>
 
               <p className="qr-safe"><ShieldAlert size={14} /><span>QR senders send plain text from WhatsApp Web — keep the 20s+ delay, warm the number up slowly, and expect a real ban risk on bulk bursts.</span></p>

@@ -51,18 +51,25 @@ export async function sendCampaignBatch(campaignId: string, batchSize = 10, opti
   if (campaign.status === "paused") throw new Error("Resume this campaign before sending.");
   if (!campaign.template && !campaign.message.trim()) throw new Error("This campaign has no message or template to send.");
 
-  // Find assigned connected account; prioritize template owner, or fallback to assigned connected account
+  // Senders: use the assigned numbers, and when the operator assigned none,
+  // loop over every connected number so campaigns run from the whole pool.
   const assignedAccounts = (campaign.accountAssignments.map(item => item.account) as SenderAccount[]).filter(isSendable);
+  const templateOwnerId = campaign.template?.accountId || null;
+  const pool = assignedAccounts.length
+    ? assignedAccounts
+    : ((await prisma.whatsAppAccount.findMany({ where: { status: "connected" }, orderBy: { createdAt: "asc" } })) as SenderAccount[]).filter(isSendable);
 
-  const primaryAccount = assignedAccounts.find(item => item.id === campaign.template?.accountId) || assignedAccounts[0];
-  const accounts = campaign.rotationIntervalSeconds > 0 ? assignedAccounts : primaryAccount ? [primaryAccount] : [];
+  // A Meta template only exists inside its own WABA, so never rotate that
+  // template through a different Meta number. QR senders are unaffected.
+  const usable = pool.filter(account => isBridgeAccount(account) || !templateOwnerId || account.id === templateOwnerId);
+  const accounts = [...usable].sort((a, b) => Number(b.id === templateOwnerId) - Number(a.id === templateOwnerId));
 
   if (accounts.length === 0) {
     const expiredAccount = (campaign.accountAssignments.map(item => item.account) as SenderAccount[]).find(item => item.status === "expired");
     if (expiredAccount) {
       throw new Error(`The WhatsApp access token for "${expiredAccount.name}" has expired. Open WhatsApp Accounts → Update Token and paste a fresh token.`);
     }
-    throw new Error("Assign a connected sender with a valid WhatsApp number to this campaign.");
+    throw new Error("Connect at least one sender and assign it to this campaign (or leave the assignment empty to use every connected number).");
   }
 
   // A QR/Baileys sender has no Meta approval step: it sends the rendered text.
@@ -107,11 +114,15 @@ export async function sendCampaignBatch(campaignId: string, batchSize = 10, opti
   const ordinal = new Map(order.map((item, index) => [item.id, index]));
   const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-  // Bridge senders must never burst: enforce a floor plus jitter so the pattern
-  // looks human. Meta senders keep the interval the operator configured.
+  // The operator decides the gap between two messages. The anti-ban floor is
+  // per number, not per campaign: with 6 connected numbers a 3s gap still gives
+  // every number a full 20s of rest. Jitter keeps the pattern from looking
+  // machine-perfect. Meta-only senders use the configured delay as-is.
   const usesBridge = accounts.some(isBridgeAccount);
+  const bridgeAccounts = accounts.filter(isBridgeAccount).length || 1;
+  const perMessageFloorMs = Math.ceil(bridgeMinDelayMs() / bridgeAccounts);
   const configuredIntervalMs = campaign.rotationIntervalSeconds * 1000;
-  const intervalMs = usesBridge ? Math.max(configuredIntervalMs, bridgeMinDelayMs()) : configuredIntervalMs;
+  const intervalMs = usesBridge ? Math.max(configuredIntervalMs, perMessageFloorMs) : configuredIntervalMs;
   const jitterMs = usesBridge ? Math.round(intervalMs * 0.3) : 0;
 
   let sent = 0;

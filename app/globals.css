@@ -364,3 +364,15 @@ html,body{
   .accounts-head{padding:18px}
   .accounts-head-actions .btn{flex:1 1 auto;justify-content:center}
 }
+/* ---------- multi-number onboarding ---------- */
+.qr-actions{flex-wrap:wrap}
+.qr-actions .btn{min-width:120px}
+.qr-next{
+  display:flex;gap:9px;align-items:center;
+  padding:11px 12px;border-radius:12px;
+  border:1px solid #cfeade;background:#f1fbf6;color:#0a7d5c;
+  font-size:10.5px;line-height:1.5;
+}
+.qr-next svg{flex:none}
+.qr-next b{font-weight:750}
+.sender-actions .help{margin:6px 0 0;font-size:9.5px;line-height:1.45}

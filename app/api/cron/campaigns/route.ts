@@ -11,12 +11,17 @@ const BATCH_SIZE = 10;
 const TIME_BUDGET_MS = 50_000;
 
 function authorized(req: Request) {
-  const secret = process.env.CRON_SECRET || "";
   const supplied = req.headers.get("authorization") || "";
-  const expected = `Bearer ${secret}`;
+  // CRON_SECRET is used by Vercel Cron; WORKER_SECRET lets the local worker
+  // machine keep campaigns moving between the once-a-day Hobby cron runs.
+  const secrets = [process.env.CRON_SECRET, process.env.WORKER_SECRET]
+    .map(secret => (secret || "").trim())
+    .filter(secret => secret.length >= 24);
   const a = Buffer.from(supplied);
-  const b = Buffer.from(expected);
-  return secret.length >= 32 && a.length === b.length && timingSafeEqual(a, b);
+  return secrets.some(secret => {
+    const b = Buffer.from(`Bearer ${secret}`);
+    return a.length === b.length && timingSafeEqual(a, b);
+  });
 }
 
 export async function GET(req: Request) {
@@ -24,7 +29,11 @@ export async function GET(req: Request) {
 
   const now = new Date();
   const due = await prisma.campaign.findMany({
-    where: { status: { in: ["scheduled", "running"] }, scheduledAt: { lte: now } },
+    where: {
+      status: { in: ["scheduled", "running"] },
+      // Running campaigns have no schedule; scheduled ones start when due.
+      OR: [{ scheduledAt: null }, { scheduledAt: { lte: now } }],
+    },
     orderBy: { scheduledAt: "asc" },
     take: 10,
     select: { id: true },
