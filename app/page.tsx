@@ -128,7 +128,7 @@ export default function Home() {
     }
   };
   const sendTestMessage = async (account: Account) => {
-    const to = prompt(`Send a WhatsApp test template from ${account.name} to which number?\n\nInclude the country code, for example +923001234567`, "");
+    const to = prompt(`Send a WhatsApp test message from ${account.name} to which number?\n\nInclude the country code, for example +923001234567`, "");
     if (!to) return;
     setTestingId(account.id);
     try {
@@ -400,7 +400,7 @@ export default function Home() {
         </div>
       )}
       <div className={`notice account-notice ${metaConfig?.enabled ? "" : "warn"}`}>{metaConfig?.enabled ? "Meta App credentials (META_APP_ID & META_APP_SECRET) are active on the server. Tokens will automatically be exchanged for 60-day validity." : `Meta server settings missing: ${metaConfig?.missing.join(", ") || "configuration"}. Add them in Vercel to enable 60-day token exchange.`}</div>
-      <div className="notice warn account-notice"><AlertTriangle size={16}/>Send only to contacts who explicitly opted in. Business-initiated campaigns require approved Meta templates.</div>
+      <div className="notice warn account-notice"><AlertTriangle size={16}/>Send only to contacts who explicitly opted in. Meta senders require approved templates; QR (Baileys) senders send plain text but carry a real WhatsApp ban risk — keep the delays.</div>
       <div className="card account-setup-card">
         <div className="card-head">
           <div>
