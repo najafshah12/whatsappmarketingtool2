@@ -96,6 +96,8 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
     ...details,
   ];
 
+  await prisma.auditLog.create({ data: { action: "campaign.report_downloaded", entity: "campaign", entityId: campaign.id, detail: { recipients: total } } });
+
   const filename = ascii(campaign.name, 80).trim().replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "campaign-report";
   return new NextResponse(makePdf(summary), {
     headers: {
