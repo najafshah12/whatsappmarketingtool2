@@ -4,6 +4,7 @@ import Image from "next/image";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Activity, AlertTriangle, Archive, Bell, CalendarClock, CalendarDays, Check, ChevronRight, CircleHelp, Clock3, ContactRound, FileText, KeyRound, LayoutDashboard, LoaderCircle, LogOut, Menu, MessageCircle, MessageSquare, Pencil, Phone, Plus, QrCode, RefreshCw, Search, Send, Settings, ShieldCheck, Sparkles, Trash2, Users, X } from "lucide-react";
 import QrConnect from "@/components/QrConnect";
+import SendMessage from "@/components/SendMessage";
 
 type Contact = { id: string; name: string; phone: string; email: string | null; groupName: string | null; tags: string[]; optedOut: boolean; marketingOptIn: boolean };
 type TemplateButton = { type: "QUICK_REPLY"; text: string } | { type: "URL"; text: string; url: string } | { type: "PHONE_NUMBER"; text: string; phoneNumber: string };
@@ -49,6 +50,7 @@ export default function Home() {
   const [selectedConversation, setSelectedConversation] = useState<InboxDetail | null>(null), [search, setSearch] = useState(""), [toast, setToast] = useState(""), [error, setError] = useState(""), [busy, setBusy] = useState(false), [accountForm, setAccountForm] = useState(false), [groupForm, setGroupForm] = useState(false), [templateForm, setTemplateForm] = useState(false), [contactForm, setContactForm] = useState(false), [replyBusy, setReplyBusy] = useState(false);
   const [tokenForm, setTokenForm] = useState(false), [tokenMode, setTokenMode] = useState<"connect" | "update">("connect"), [tokenAccountId, setTokenAccountId] = useState(""), [tokenAccountName, setTokenAccountName] = useState(""), [tokenPhoneId, setTokenPhoneId] = useState(""), [tokenWabaId, setTokenWabaId] = useState("");
   const [qrModal, setQrModal] = useState<{ account?: Account } | null>(null);
+  const [messageModal, setMessageModal] = useState<Account | null>(null);
   const [bridgeHealth, setBridgeHealth] = useState<"checking" | "online" | "offline">("checking");
   const [health, setHealth] = useState<{ status: string; checks: Record<string, string>; responseTimeMs: number } | null>(null), [healthBusy, setHealthBusy] = useState(false);
   const [verifyingId, setVerifyingId] = useState("");
@@ -395,7 +397,10 @@ export default function Home() {
                 <h3>{a.name}</h3>
                 <small>{isBridge ? `${a.phone} · QR session ${a.bridgeSessionId}` : `${a.phone} ${a.phoneNumberId ? `· ID: ${a.phoneNumberId}` : ""}`}</small>
               </div>
-              <Pill tone={a.status === "connected" ? (expired ? "red" : "green") : a.status === "expired" ? "red" : "yellow"}>{isBridge ? (a.status === "connected" ? "qr connected" : "scan needed") : expired ? "token expired" : a.status}</Pill>
+              <div className="sender-head-right">
+                <Pill tone={a.status === "connected" ? (expired ? "red" : "green") : a.status === "expired" ? "red" : "yellow"}>{isBridge ? (a.status === "connected" ? "qr connected" : "scan needed") : expired ? "token expired" : a.status}</Pill>
+                <button className="icon-btn danger" onClick={() => void deleteAccount(a)} title="Remove account"><Trash2 size={14}/></button>
+              </div>
             </div>
             <div className="sender-meta">
               <span>Assigned campaigns</span>
@@ -404,6 +409,11 @@ export default function Home() {
             {tokenBadge}
             {(a.status === "connected" || a.status === "expired") && !isBridge && <p className="help">{a.webhookSubscribedAt ? "Webhooks subscribed" : "Webhooks: auto-subscribed or pending"}</p>}
             <div className="sender-actions">
+              {a.status === "connected" && (
+                <button className="btn btn-small btn-primary sender-send" onClick={() => setMessageModal(a)} title={`Write and send a message from ${a.name}`}>
+                  <MessageSquare size={13}/>Send message
+                </button>
+              )}
               {isBridge && (
                 <button className="btn btn-small" onClick={() => openQr(a)} title="Link this number with a WhatsApp QR scan">
                   <QrCode size={13}/>{a.status === "connected" ? "Session QR" : "Scan QR"}
@@ -438,7 +448,6 @@ export default function Home() {
               ) : (
                 <Pill>Not connected</Pill>
               )}
-              <button className="icon-btn danger" onClick={() => void deleteAccount(a)} title="Remove account"><Trash2 size={15}/></button>
             </div>
           </article>
         );
@@ -455,7 +464,7 @@ export default function Home() {
 
       {section === "Settings" && <><div className="page-head"><div><h2>Settings</h2><p>Platform configuration and Meta WhatsApp API parameters.</p></div></div><div className="settings-grid"><div className="card setting"><h3>WhatsApp Business Platform</h3><p>Server-side configuration parameters.</p>{[["Meta App ID", "META_APP_ID"], ["Embedded Signup config", "META_CONFIG_ID"], ["Meta app secret", "META_APP_SECRET"], ["Webhook verify token", "WA_WEBHOOK_VERIFY_TOKEN"], ["Webhook signature secret", "META_APP_SECRET / WA_APP_SECRET"], ["Token encryption key", "WA_TOKEN_ENCRYPTION_KEY"], ["Scheduled sender secret", "CRON_SECRET"]].map(([label, key]) => <div className="setting-row" key={key}><span>{label}</span><code>{key}</code></div>)}<div className={`notice ${metaConfig?.enabled ? "" : "warn"}`}>{metaConfig?.enabled ? "Meta credentials are configured." : `Missing parameters: ${metaConfig?.missing.join(", ") || "loading"}`}</div><div className="notice">Webhook callback URL: <code>{typeof window === "undefined" ? "" : `${window.location.origin}/api/webhook`}</code></div><p className="help">Configure this callback URL in your Meta App Dashboard under WhatsApp &gt; Configuration.</p></div><div className="card setting"><h3>Workspace Details</h3><div className="setting-row"><span>Database</span><b>{error ? "Connection issue" : "PostgreSQL"}</b></div><div className="setting-row"><span>Scheduled sender</span><b>{metaConfig?.cronConfigured ? "Active" : "Not configured"}</b></div><div className="setting-row"><span>Total contacts</span><b>{stats?.contacts ?? "—"}</b></div><div className="setting-row"><span>Connected accounts</span><b>{stats?.accounts ?? "—"}</b></div><div className="setting-row"><span>Active user</span><b>Admin</b></div><p className="help">Secure admin session. Use the account controls in the sidebar to change password or sign out.</p></div><div className="card setting"><h3>System Health</h3><p>Live database and configuration probe.</p><div className="setting-row"><span>Status</span><b>{health ? (health.status === "ok" ? "Healthy" : "Degraded") : "Not checked"}</b></div>{health && Object.entries(health.checks).map(([key, value]) => <div className="setting-row" key={key}><span>{key}</span><b>{value}</b></div>)}<div className="setting-row"><span>Response time</span><b>{health ? `${health.responseTimeMs} ms` : "—"}</b></div><button className="btn btn-small" onClick={runHealthCheck} disabled={healthBusy}>{healthBusy ? <LoaderCircle size={14} className="spin"/> : <Activity size={14}/>}Run health check</button><p className="help">Public probe endpoint: <code>/api/health</code></p></div></div></>}
 
-    </div><footer className="statusbar"><span><i/>ACTIVE</span><span>{stats?.accounts ?? 0} ACCOUNTS CONNECTED</span><small>Workspace Active</small></footer></main>{qrModal && <QrConnect account={qrModal.account} takenSessions={accounts.map(a => a.bridgeSessionId).filter((value): value is string => Boolean(value))} onClose={() => setQrModal(null)} onSaved={async () => { await refresh(); }} onConnected={async () => { await refresh(); setToast("QR sender connected — you can create a campaign now."); }} />}{toast && <div className="toast">{toast}</div>}</div>;
+    </div><footer className="statusbar"><span><i/>ACTIVE</span><span>{stats?.accounts ?? 0} ACCOUNTS CONNECTED</span><small>Workspace Active</small></footer></main>{qrModal && <QrConnect account={qrModal.account} takenSessions={accounts.map(a => a.bridgeSessionId).filter((value): value is string => Boolean(value))} onClose={() => setQrModal(null)} onSaved={async () => { await refresh(); }} onConnected={async () => { await refresh(); setToast("QR sender connected — you can create a campaign now."); }} />}{messageModal && <SendMessage account={messageModal} onClose={() => setMessageModal(null)} onSent={async message => { setToast(message); await refresh(); }} />}{toast && <div className="toast">{toast}</div>}</div>;
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) { return <label className="field"><span>{label}</span>{children}</label>; }
