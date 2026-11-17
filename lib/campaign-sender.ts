@@ -33,18 +33,15 @@ export async function sendCampaignBatch(campaignId: string, batchSize = 10) {
     ? assignedAccounts
     : [assignedAccounts.find(item => item.id === campaign.template?.accountId) || assignedAccounts[0]];
 
-  if (!account) {
+  if (accounts.length === 0) {
     const expiredAccount = campaign.accountAssignments.map(item => item.account).find(item => item.status === "expired");
     if (expiredAccount) {
       throw new Error(`The WhatsApp access token for "${expiredAccount.name}" has expired. Open WhatsApp Accounts → Update Token and paste a fresh token.`);
     }
     throw new Error("Assign a connected sender with a valid WhatsApp number to this campaign.");
   }
-  if (account.tokenExpiresAt && account.tokenExpiresAt.getTime() <= Date.now()) {
-    throw new Error(`The WhatsApp access token for "${account.name}" has expired (${account.tokenExpiresAt.toLocaleDateString()}). Please update the token in the Accounts section.`);
-  }
-  if (accounts.some(account => account.tokenExpiresAt && account.tokenExpiresAt.getTime() <= Date.now())) {
-    const expired = accounts.find(account => account.tokenExpiresAt && account.tokenExpiresAt.getTime() <= Date.now())!;
+  const expired = accounts.find(account => account.tokenExpiresAt && account.tokenExpiresAt.getTime() <= Date.now());
+  if (expired) {
     throw new Error(`The WhatsApp access token for "${expired.name}" has expired. Please update it in Accounts.`);
   }
   accounts.forEach(accountAccessToken);
