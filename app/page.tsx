@@ -2,11 +2,11 @@
 
 import Image from "next/image";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Activity, AlertTriangle, Archive, Bell, CalendarClock, CalendarDays, Check, ChevronRight, CircleHelp, Clock3, ContactRound, FileText, KeyRound, LayoutDashboard, LoaderCircle, LogOut, Menu, MessageCircle, MessageSquare, Pencil, Phone, Plus, RefreshCw, Search, Send, Settings, ShieldCheck, Sparkles, Trash2, Users, X } from "lucide-react";
+import { Activity, AlertTriangle, Archive, Bell, CalendarClock, CalendarDays, Check, ChevronRight, CircleHelp, Clock3, ContactRound, FileText, KeyRound, LayoutDashboard, LoaderCircle, LogOut, Menu, MessageCircle, MessageSquare, Pencil, Phone, Plus, QrCode, RefreshCw, Search, Send, Settings, ShieldCheck, Sparkles, Trash2, Users, X } from "lucide-react";
 
 type Contact = { id: string; name: string; phone: string; email: string | null; groupName: string | null; tags: string[]; optedOut: boolean; marketingOptIn: boolean };
 type TemplateButton = { type: "QUICK_REPLY"; text: string } | { type: "URL"; text: string; url: string } | { type: "PHONE_NUMBER"; text: string; phoneNumber: string };
-type Account = { id: string; name: string; phone: string; status: string; phoneNumberId?: string | null; businessAccountId?: string | null; tokenExpiresAt?: string | null; webhookSubscribedAt?: string | null; _count?: { campaignAssignments: number } };
+type Account = { id: string; name: string; phone: string; status: string; provider?: string; bridgeSessionId?: string | null; phoneNumberId?: string | null; businessAccountId?: string | null; tokenExpiresAt?: string | null; webhookSubscribedAt?: string | null; _count?: { campaignAssignments: number } };
 type Group = { id: string; name: string; description?: string | null; _count: { members: number }; members?: { contactId: string }[] };
 type Campaign = { id: string; name: string; message: string; rotationIntervalSeconds?: number; status: string; total: number; delivered: number; read: number; failed: number; createdAt: string; scheduledAt?: string | null; accountAssignments?: { account: Account }[]; audienceGroup?: Group | null; template?: { id: string; name: string; body: string; status: string; language: string; accountId?: string | null } | null };
 type Template = { id: string; name: string; body: string; status: string; language: string; category?: string; buttons?: TemplateButton[] | null; accountId?: string | null; account?: { id: string; name: string; status: string } | null };
@@ -47,6 +47,8 @@ export default function Home() {
   const [metaConfig, setMetaConfig] = useState<MetaConfig | null>(null), [signupCode, setSignupCode] = useState(""), [signupDetails, setSignupDetails] = useState<MetaSignupDetails | null>(null), [metaSdkReady, setMetaSdkReady] = useState(false);
   const [selectedConversation, setSelectedConversation] = useState<InboxDetail | null>(null), [search, setSearch] = useState(""), [toast, setToast] = useState(""), [error, setError] = useState(""), [busy, setBusy] = useState(false), [accountForm, setAccountForm] = useState(false), [groupForm, setGroupForm] = useState(false), [templateForm, setTemplateForm] = useState(false), [contactForm, setContactForm] = useState(false), [replyBusy, setReplyBusy] = useState(false);
   const [tokenForm, setTokenForm] = useState(false), [tokenMode, setTokenMode] = useState<"connect" | "update">("connect"), [tokenAccountId, setTokenAccountId] = useState(""), [tokenAccountName, setTokenAccountName] = useState(""), [tokenPhoneId, setTokenPhoneId] = useState(""), [tokenWabaId, setTokenWabaId] = useState("");
+  const [bridgeForm, setBridgeForm] = useState(false);
+  const [qrAccount, setQrAccount] = useState<Account | null>(null), [qrState, setQrState] = useState<{ status: string; bridgeStatus: string; qr: string | null; phone: string | null } | null>(null), [qrError, setQrError] = useState("");
   const [health, setHealth] = useState<{ status: string; checks: Record<string, string>; responseTimeMs: number } | null>(null), [healthBusy, setHealthBusy] = useState(false);
   const [verifyingId, setVerifyingId] = useState("");
   const [testingId, setTestingId] = useState("");
@@ -70,11 +72,48 @@ export default function Home() {
   const loadConversation = async (id: string) => { try { const data = await api<InboxDetail>(`/api/inbox/${id}`, { method: "PATCH", body: JSON.stringify({ status: "open" }) }); const detail = await api<InboxDetail>(`/api/inbox/${id}`); setSelectedConversation(detail); await refresh(); } catch (e) { setToast(e instanceof Error ? e.message : "Could not open conversation"); } };
   const runHealthCheck = async () => { setHealthBusy(true); try { const response = await fetch("/api/health", { cache: "no-store" }); const result = await response.json(); setHealth(result); setToast(result.status === "ok" ? "All systems healthy." : "Some checks need attention."); } catch (e) { setHealth(null); setToast(e instanceof Error ? e.message : "Health check failed"); } finally { setHealthBusy(false); } };
   const createAccount = async (e: React.FormEvent<HTMLFormElement>) => { e.preventDefault(); const form = new FormData(e.currentTarget); setBusy(true); try { await api("/api/accounts", { method: "POST", body: JSON.stringify({ name: form.get("name"), phone: form.get("phone"), phoneNumberId: form.get("phoneNumberId"), businessAccountId: form.get("businessAccountId") }) }); setAccountForm(false); setToast("Sender record saved. Connect it with Meta before sending."); await refresh(); } catch (e) { setToast(e instanceof Error ? e.message : "Could not save account"); } finally { setBusy(false); } };
-  const disconnectAccount = async (account: Account) => { if (!confirm(`Disconnect ${account.name} from WhatsApp Cloud API?`)) return; try { await api(`/api/accounts/${account.id}/disconnect`, { method: "POST" }); await refresh(); } catch (e) { setToast(e instanceof Error ? e.message : "Could not disconnect account"); } };
+  const disconnectAccount = async (account: Account) => { if (!confirm(`Disconnect ${account.name} from WhatsApp?`)) return; try { await api(`/api/accounts/${account.id}/disconnect`, { method: "POST" }); await refresh(); } catch (e) { setToast(e instanceof Error ? e.message : "Could not disconnect account"); } };
+  const addBridgeAccount = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const form = new FormData(e.currentTarget);
+    setBusy(true);
+    try {
+      const account = await api<Account>("/api/accounts", { method: "POST", body: JSON.stringify({ name: form.get("name"), phone: form.get("phone"), provider: "bridge", bridgeSessionId: form.get("bridgeSessionId") }) });
+      setBridgeForm(false);
+      setToast("QR sender saved. Scan its QR code to connect WhatsApp.");
+      await refresh();
+      setQrAccount(account); setQrState(null); setQrError("");
+    } catch (err) { setToast(err instanceof Error ? err.message : "Could not add the QR sender"); } finally { setBusy(false); }
+  };
+  const openQr = (account: Account) => { setQrAccount(account); setQrState(null); setQrError(""); };
+  useEffect(() => {
+    if (!qrAccount) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const load = async () => {
+      try {
+        const data = await api<{ status: string; bridgeStatus: string; qr: string | null; phone: string | null }>(`/api/accounts/${qrAccount.id}/qr`);
+        if (cancelled) return;
+        setQrState(data); setQrError("");
+        if (data.status === "connected") { setToast(`${qrAccount.name} is connected${data.phone ? ` as ${data.phone}` : ""}.`); await refresh(); return; }
+      } catch (err) {
+        if (cancelled) return;
+        setQrError(err instanceof Error ? err.message : "Could not load the QR code");
+      }
+      timer = setTimeout(() => void load(), 3000);
+    };
+    void load();
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [qrAccount, refresh]);
   const verifyAccount = async (account: Account) => {
     setVerifyingId(account.id);
     try {
-      const res = await api<{ ok: boolean; phone?: string; verifiedName?: string; qualityRating?: string | null; isPermanent: boolean; daysRemaining: number | null; expiresAt: string | null }>(`/api/accounts/${account.id}/verify`, { method: "POST" });
+      const res = await api<{ ok: boolean; phone?: string; verifiedName?: string; qualityRating?: string | null; isPermanent: boolean; daysRemaining: number | null; expiresAt: string | null; provider?: string; message?: string }>(`/api/accounts/${account.id}/verify`, { method: "POST" });
+      if (res.provider === "bridge") {
+        setToast(res.message || `QR sender connected${res.phone ? ` as ${res.phone}` : ""}.`);
+        await refresh();
+        return;
+      }
       const expiry = res.isPermanent
         ? "permanent token"
         : res.daysRemaining != null
@@ -276,7 +315,7 @@ export default function Home() {
       {section === "Previous Campaign Records" && <><div className="page-head"><div><h2>Campaign Records</h2><p>Historical campaign data, dispatch logs, and delivery metrics.</p></div><button className="btn btn-primary" onClick={() => setSection("Create Campaign")}><Plus size={15}/>Create campaign</button></div><div className="card table-card"><CampaignTable campaigns={campaigns} onStatus={campaignStatus} onSend={sendCampaign} onDelete={deleteCampaign}/></div></>}
 
       {section === "Campaign Reports" && <><div className="page-head"><div><h2>Campaign Reports</h2><p>Download a recipient-by-recipient PDF with delivery, pending, skipped, and failure details.</p></div></div><div className="card table-card"><table className="table"><thead><tr><th>CAMPAIGN</th><th>STATUS</th><th>SUCCESS RATE</th><th>DELIVERED / READ</th><th>FAILED</th><th>RECIPIENTS</th><th>REPORT</th></tr></thead><tbody>{campaigns.map(c => { const success = c.total ? Math.round((c.delivered / c.total) * 100) : 0; return <tr key={c.id}><td><b>{c.name}</b><small>{date(c.createdAt)}</small></td><td><Pill>{c.status}</Pill></td><td>{success}%</td><td>{c.delivered.toLocaleString()}</td><td className="error-text">{c.failed.toLocaleString()}</td><td>{c.total.toLocaleString()}</td><td><a className="btn btn-small" href={`/api/campaigns/${c.id}/report`}><FileText size={14}/>Download PDF</a></td></tr>; })}</tbody></table>{campaigns.length === 0 && <div className="empty"><FileText size={20}/><b>No campaign reports yet</b><small>Create a campaign to generate its report.</small></div>}</div></>}
-      {section === "Accounts" && <div className="accounts-page"><div className="page-head accounts-head"><div><span className="account-eyebrow">CHANNEL SETUP</span><h2>WhatsApp Business Accounts</h2><p>Connect with a 60-day Long-Lived Token or through Meta Embedded Signup.</p></div><div className="accounts-head-actions"><button className="btn btn-primary" onClick={() => { setTokenMode("connect"); setTokenAccountId(""); setTokenAccountName(""); setTokenPhoneId(""); setTokenWabaId(""); setTokenForm(!tokenForm); }}><KeyRound size={15}/>{tokenForm && tokenMode === "connect" ? "Close Token Form" : "Connect with Token (60 Days)"}</button><button className="btn" disabled={busy || !metaSdkReady} onClick={startMetaSignup}><Plus size={15}/>{metaSdkReady ? "Connect with Meta Popup" : "Loading Meta popup…"}</button></div></div>
+      {section === "Accounts" && <div className="accounts-page"><div className="page-head accounts-head"><div><span className="account-eyebrow">CHANNEL SETUP</span><h2>WhatsApp Business Accounts</h2><p>Connect Meta senders with a 60-day token or Embedded Signup, or add QR (Baileys) senders that need no Meta approval.</p></div><div className="accounts-head-actions"><button className="btn btn-primary" onClick={() => { setBridgeForm(!bridgeForm); setTokenForm(false); }}><QrCode size={15}/>{bridgeForm ? "Close QR Form" : "Add QR Sender (Baileys)"}</button><button className="btn" onClick={() => { setTokenMode("connect"); setTokenAccountId(""); setTokenAccountName(""); setTokenPhoneId(""); setTokenWabaId(""); setTokenForm(!tokenForm); setBridgeForm(false); }}><KeyRound size={15}/>{tokenForm && tokenMode === "connect" ? "Close Token Form" : "Connect with Token (60 Days)"}</button><button className="btn" disabled={busy || !metaSdkReady} onClick={startMetaSignup}><Plus size={15}/>{metaSdkReady ? "Connect with Meta Popup" : "Loading Meta popup…"}</button></div></div>
       <div className="account-overview"><div className="account-stat"><span className="account-stat-icon"><Phone size={17}/></span><div><small>Connected numbers</small><b>{accounts.filter(a => a.status === "connected").length}</b></div></div><div className="account-stat"><span className="account-stat-icon"><ShieldCheck size={17}/></span><div><small>Ready to send</small><b>{accounts.filter(a => a.status === "connected" && (!a.tokenExpiresAt || new Date(a.tokenExpiresAt).getTime() > Date.now())).length}</b></div></div><div className="account-stat"><span className="account-stat-icon"><Activity size={17}/></span><div><small>Need attention</small><b>{accounts.filter(a => a.status !== "connected").length}</b></div></div></div>
       {tokenForm && (
         <form className="card form-card account-token-form" onSubmit={handleTokenSubmit}>
@@ -317,6 +356,49 @@ export default function Home() {
           </div>
         </form>
       )}
+      {bridgeForm && (
+        <form className="card form-card account-token-form" onSubmit={addBridgeAccount}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <h3 style={{ margin: 0 }}>Add QR (Baileys) Sender</h3>
+            <button type="button" className="icon-btn" onClick={() => setBridgeForm(false)} title="Close"><X size={16}/></button>
+          </div>
+          <div className="notice" style={{ background: "#ffffff" }}>
+            🟢 <b>No Meta approval needed.</b> This sender connects through your self-hosted WhatsApp bridge and sends plain text directly — no template review, no 24-hour window. Scan the QR once and the session stays logged in.
+          </div>
+          <div className="form-grid">
+            <Field label="Sender name *"><input name="name" required maxLength={80} placeholder="e.g. Rohaan WhatsApp 1" /></Field>
+            <Field label="WhatsApp number *"><input name="phone" required placeholder="+923001234567" /></Field>
+            <Field label="Bridge session name *"><input name="bridgeSessionId" required pattern="[a-zA-Z0-9_-]{2,40}" placeholder="account1" defaultValue={`account${accounts.filter(a => a.provider === "bridge").length + 1}`} /><small className="help">Har number ka alag session: account1, account2, account3…</small></Field>
+          </div>
+          <div className="form-actions">
+            <button type="button" className="btn" onClick={() => setBridgeForm(false)}>Cancel</button>
+            <button className="btn btn-primary" disabled={busy}>{busy ? <LoaderCircle size={14} className="spin"/> : <Check size={14}/>}Save &amp; Show QR</button>
+          </div>
+        </form>
+      )}
+      {qrAccount && (
+        <div className="card form-card account-token-form">
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <h3 style={{ margin: 0 }}>Connect “{qrAccount.name}” — scan the QR</h3>
+            <button type="button" className="icon-btn" onClick={() => { setQrAccount(null); setQrState(null); setQrError(""); }} title="Close"><X size={16}/></button>
+          </div>
+          <div style={{ textAlign: "center", padding: "12px 0" }}>
+            {qrError && <p className="notice warn">{qrError}</p>}
+            {qrState?.status === "connected" ? (
+              <p className="notice" style={{ color: "#16a34a", fontWeight: "bold" }}>✓ Connected{qrState.phone ? ` as ${qrState.phone}` : ""}. You can close this window.</p>
+            ) : qrState?.qr ? (
+              <>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={qrState.qr} alt="WhatsApp QR code" width={280} height={280} style={{ border: "1px solid #e2e8f0", padding: 10, borderRadius: 12, background: "#fff" }} />
+                <p className="help">WhatsApp → Linked Devices → Link a Device se scan karein. QR har ~20 second badalta hai; ye page khud refresh karta hai.</p>
+              </>
+            ) : (
+              <p className="help"><LoaderCircle size={14} className="spin" /> QR ban raha hai…</p>
+            )}
+            <p className="help">Session: <code>{qrAccount.bridgeSessionId}</code></p>
+          </div>
+        </div>
+      )}
       <div className={`notice account-notice ${metaConfig?.enabled ? "" : "warn"}`}>{metaConfig?.enabled ? "Meta App credentials (META_APP_ID & META_APP_SECRET) are active on the server. Tokens will automatically be exchanged for 60-day validity." : `Meta server settings missing: ${metaConfig?.missing.join(", ") || "configuration"}. Add them in Vercel to enable 60-day token exchange.`}</div>
       <div className="notice warn account-notice"><AlertTriangle size={16}/>Send only to contacts who explicitly opted in. Business-initiated campaigns require approved Meta templates.</div>
       <div className="card account-setup-card">
@@ -346,9 +428,10 @@ export default function Home() {
         </p>
       </div>
       <div className="account-grid account-grid-polished">{accounts.map(a => {
+        const isBridge = a.provider === "bridge";
         let tokenBadge = null;
-        let expired = a.status === "expired";
-        if (a.status === "connected" || expired) {
+        let expired = a.status === "expired" && !isBridge;
+        if (!isBridge && (a.status === "connected" || expired)) {
           if (!a.tokenExpiresAt && !expired) {
             tokenBadge = <p className="help" style={{ color: "#16a34a", fontWeight: "bold" }}>✓ Permanent System User Token</p>;
           } else {
@@ -367,38 +450,45 @@ export default function Home() {
             <div className="sender-head">
               <div>
                 <h3>{a.name}</h3>
-                <small>{a.phone} {a.phoneNumberId ? `· ID: ${a.phoneNumberId}` : ""}</small>
+                <small>{isBridge ? `${a.phone} · QR session ${a.bridgeSessionId}` : `${a.phone} ${a.phoneNumberId ? `· ID: ${a.phoneNumberId}` : ""}`}</small>
               </div>
-              <Pill tone={a.status === "connected" ? (expired ? "red" : "green") : a.status === "expired" ? "red" : "yellow"}>{expired ? "token expired" : a.status}</Pill>
+              <Pill tone={a.status === "connected" ? (expired ? "red" : "green") : a.status === "expired" ? "red" : "yellow"}>{isBridge ? (a.status === "connected" ? "qr connected" : "scan needed") : expired ? "token expired" : a.status}</Pill>
             </div>
             <div className="sender-meta">
               <span>Assigned campaigns</span>
               <b>{a._count?.campaignAssignments ?? campaigns.filter(c => c.accountAssignments?.some(x => x.account.id === a.id)).length}</b>
             </div>
             {tokenBadge}
-            {(a.status === "connected" || a.status === "expired") && <p className="help">{a.webhookSubscribedAt ? "Webhooks subscribed" : "Webhooks: auto-subscribed or pending"}</p>}
+            {(a.status === "connected" || a.status === "expired") && !isBridge && <p className="help">{a.webhookSubscribedAt ? "Webhooks subscribed" : "Webhooks: auto-subscribed or pending"}</p>}
             <div className="sender-actions">
+              {isBridge && (
+                <button className="btn btn-small" onClick={() => openQr(a)} title="Show the WhatsApp QR code for this sender">
+                  <QrCode size={13}/>{a.status === "connected" ? "Session QR" : "Show QR"}
+                </button>
+              )}
               {(a.status === "connected" || a.status === "expired") && (
-                <button className="btn btn-small" disabled={verifyingId === a.id} onClick={() => void verifyAccount(a)} title="Ask Meta whether this number can send right now">
+                <button className="btn btn-small" disabled={verifyingId === a.id} onClick={() => void verifyAccount(a)} title={isBridge ? "Ask the WhatsApp bridge whether this session is still connected" : "Ask Meta whether this number can send right now"}>
                   <RefreshCw size={13}/>{verifyingId === a.id ? "Checking…" : "Check Connection"}
                 </button>
               )}
               {a.status === "connected" && (
-                <button className="btn btn-small" disabled={testingId === a.id} onClick={() => void sendTestMessage(a)} title="Send an approved template to your own number">
+                <button className="btn btn-small" disabled={testingId === a.id} onClick={() => void sendTestMessage(a)} title={isBridge ? "Send a plain test message through the bridge" : "Send an approved template to your own number"}>
                   <Send size={13}/>{testingId === a.id ? "Sending…" : "Send Test"}
                 </button>
               )}
-              <button className="btn btn-small" onClick={() => {
-                setTokenMode("update");
-                setTokenAccountId(a.id);
-                setTokenAccountName(a.name);
-                setTokenPhoneId(a.phoneNumberId || "");
-                setTokenWabaId(a.businessAccountId || "");
-                setTokenForm(true);
-                window.scrollTo({ top: 0, behavior: "smooth" });
-              }} title="Update or refresh WhatsApp token">
-                <KeyRound size={13}/>Update Token
-              </button>
+              {!isBridge && (
+                <button className="btn btn-small" onClick={() => {
+                  setTokenMode("update");
+                  setTokenAccountId(a.id);
+                  setTokenAccountName(a.name);
+                  setTokenPhoneId(a.phoneNumberId || "");
+                  setTokenWabaId(a.businessAccountId || "");
+                  setTokenForm(true);
+                  window.scrollTo({ top: 0, behavior: "smooth" });
+                }} title="Update or refresh WhatsApp token">
+                  <KeyRound size={13}/>Update Token
+                </button>
+              )}
               {a.status !== "disconnected" ? (
                 <button className="btn btn-small" onClick={() => void disconnectAccount(a)}>Disconnect</button>
               ) : (
@@ -411,7 +501,7 @@ export default function Home() {
       })}</div>
       {accounts.length === 0 && <Empty icon={Phone} title="No sender accounts connected" detail="Use 'Connect with Token' or 'Connect with Meta Popup' to securely add your WhatsApp Business number."/>}</div>}
 
-      {section === "Create Campaign" && <><div className="page-head"><div><h2>Create Campaign</h2><p>Choose a consented audience, Meta template, and the connected sender that owns it.</p></div><Pill tone="pink">Campaign workspace</Pill></div><form className="card campaign-form" onSubmit={createCampaign}><div className="campaign-columns"><div><Field label="Campaign name"><input name="name" required placeholder="e.g. September update" defaultValue={`Campaign ${new Date().toLocaleDateString()}`}/></Field><Field label="Audience pool"><select name="groupId"><option value="">All opted-in contacts ({audience?.eligible ?? 0})</option>{groups.map(g => <option key={g.id} value={g.id}>{g.name} ({g._count.members})</option>)}</select></Field><Field label="Choose contacts (leave empty for all opted-in contacts)"><select name="contactIds" multiple size={5}>{contacts.filter(c => c.marketingOptIn && !c.optedOut).map(c => <option key={c.id} value={c.id}>{c.name} · {c.phone}</option>)}</select></Field><Field label="WhatsApp template"><select name="templateId" defaultValue=""><option value="">Save as draft without a template</option>{templates.map(t => <option key={t.id} value={t.id}>{t.name} · {t.status.toUpperCase()}</option>)}</select></Field><Field label="Optional internal note"><textarea name="message" maxLength={4096} placeholder="Optional note for your campaign record"/></Field><label className="check-row"><input name="rotateSenders" type="checkbox"/><span><b>Rotate sender numbers</b><small>Send each message from the next connected number.</small></span></label><Field label="Delay between messages (seconds)"><input name="rotationIntervalSeconds" type="number" min="1" max="3600" defaultValue="10"/></Field><Field label="Schedule (optional)"><input name="scheduledAt" type="datetime-local" min={new Date().toISOString().slice(0, 16)}/></Field><p className="help">Scheduled sends need an approved Meta template, a connected sender assigned to it, and recorded opt-in consent. Drafts never send automatically.</p></div><div className="assigned-box"><h3>Assigned accounts</h3>{accounts.length ? accounts.map(a => <label className="check-row" key={a.id}><input name="accountIds" type="checkbox" value={a.id}/><span><b>{a.name}</b><small>{a.phone} · {a.status}</small></span><Pill tone={a.status === "connected" ? "green" : "yellow"}>{a.status}</Pill></label>) : <div className="empty compact"><Phone size={18}/><b>No sender accounts</b><small>Connect one with Meta before sending.</small></div>}<button type="button" className="btn btn-small" onClick={() => setSection("Accounts")}><Plus size={13}/>Manage accounts</button></div></div><div className="form-actions"><span className="help">Only current, explicit marketing opt-ins are included.</span><button className="btn btn-primary" disabled={busy}>{busy ? <LoaderCircle size={14}/> : <Check size={14}/>}Save campaign</button></div></form></>}
+      {section === "Create Campaign" && <><div className="page-head"><div><h2>Create Campaign</h2><p>Choose a consented audience, a template or campaign text, and the connected senders (Meta tokens or QR senders).</p></div><Pill tone="pink">Campaign workspace</Pill></div><form className="card campaign-form" onSubmit={createCampaign}><div className="campaign-columns"><div><Field label="Campaign name"><input name="name" required placeholder="e.g. September update" defaultValue={`Campaign ${new Date().toLocaleDateString()}`}/></Field><Field label="Audience pool"><select name="groupId"><option value="">All opted-in contacts ({audience?.eligible ?? 0})</option>{groups.map(g => <option key={g.id} value={g.id}>{g.name} ({g._count.members})</option>)}</select></Field><Field label="Choose contacts (leave empty for all opted-in contacts)"><select name="contactIds" multiple size={5}>{contacts.filter(c => c.marketingOptIn && !c.optedOut).map(c => <option key={c.id} value={c.id}>{c.name} · {c.phone}</option>)}</select></Field><Field label="WhatsApp template"><select name="templateId" defaultValue=""><option value="">Save as draft without a template</option>{templates.map(t => <option key={t.id} value={t.id}>{t.name} · {t.status.toUpperCase()}</option>)}</select></Field><Field label="Optional internal note"><textarea name="message" maxLength={4096} placeholder="Optional note for your campaign record"/></Field><label className="check-row"><input name="rotateSenders" type="checkbox"/><span><b>Rotate sender numbers</b><small>Send each message from the next connected number.</small></span></label><Field label="Delay between messages (seconds)"><input name="rotationIntervalSeconds" type="number" min="1" max="3600" defaultValue="10"/></Field><Field label="Schedule (optional)"><input name="scheduledAt" type="datetime-local" min={new Date().toISOString().slice(0, 16)}/></Field><p className="help">Scheduled sends need an approved Meta template (or only QR senders), a connected sender assigned to it, and recorded opt-in consent. Drafts never send automatically.</p></div><div className="assigned-box"><h3>Assigned accounts</h3>{accounts.length ? accounts.map(a => <label className="check-row" key={a.id}><input name="accountIds" type="checkbox" value={a.id}/><span><b>{a.name}</b><small>{a.phone} · {a.status}</small></span><Pill tone={a.status === "connected" ? "green" : "yellow"}>{a.status}</Pill></label>) : <div className="empty compact"><Phone size={18}/><b>No sender accounts</b><small>Connect one with Meta before sending.</small></div>}<button type="button" className="btn btn-small" onClick={() => setSection("Accounts")}><Plus size={13}/>Manage accounts</button></div></div><div className="form-actions"><span className="help">Only current, explicit marketing opt-ins are included.</span><button className="btn btn-primary" disabled={busy}>{busy ? <LoaderCircle size={14}/> : <Check size={14}/>}Save campaign</button></div></form></>}
 
       {section === "Audience Pool" && <><div className="page-head"><div><h2>Audience Pool</h2><p>Import contacts, track marketing consent, and honor opt-outs.</p></div><button className="btn" onClick={() => setContactForm(!contactForm)}><Plus size={15}/>Add contact</button><button className="btn btn-primary" onClick={() => setGroupForm(!groupForm)}><Plus size={15}/>New audience</button></div><div className="mini-stats"><div className="card"><small>Contacts</small><b>{audience?.contacts ?? "—"}</b></div><div className="card"><small>Eligible opt-ins</small><b>{audience?.eligible ?? "—"}</b></div><div className="card"><small>Opted out</small><b>{audience?.optedOut ?? "—"}</b></div></div>{contactForm && <form className="card form-card" onSubmit={createContact}><h3>Add contact</h3><div className="form-grid"><Field label="Name"><input name="name" required/></Field><Field label="WhatsApp phone (international format)"><input name="phone" required placeholder="+14155550123"/></Field><Field label="Email (optional)"><input name="email" type="email"/></Field></div><label className="check-row"><input name="marketingOptIn" type="checkbox"/><span><b>Contact explicitly opted in to marketing</b><small>Only select this when you have recorded permission.</small></span></label><div className="form-actions"><button type="button" className="btn" onClick={() => setContactForm(false)}>Cancel</button><button className="btn btn-primary" disabled={busy}>Save contact</button></div></form>}<div className="card table-card"><div className="card-head"><div><h3>Import contacts from Excel or CSV</h3><p>.xlsx, .xlsm, .csv, .txt or .tsv. Headers are optional — a plain column of phone numbers works. Optional headers: name, phone, email, groupName, tags, marketingOptIn, optedOut.</p></div></div><div className="import-options"><Field label="Audience list name"><input value={importAudience} onChange={e => setImportAudience(e.target.value)} placeholder="e.g. November leads"/><small className="help">Imported contacts go into this list. Reusing a name adds to that list.</small></Field><div className="field import-consent"><span>Marketing consent</span><label className="check-row"><input type="checkbox" checked={importOptIn} onChange={e => setImportOptIn(e.target.checked)}/><span><b>I have recorded opt-in consent</b><small>Only tick when these contacts agreed to receive marketing messages.</small></span></label></div></div><div className="form-actions import-actions"><label className="btn btn-primary" style={{ opacity: busy ? 0.6 : 1, pointerEvents: busy ? "none" : "auto" }}>{busy ? <LoaderCircle size={14} className="spin"/> : <Plus size={14}/>}{busy ? "Importing…" : "Choose file"}<input hidden type="file" accept=".xlsx,.xlsm,.csv,.txt,.tsv" disabled={busy} onChange={e => { void importContactsFile(e.target.files?.[0]); e.currentTarget.value = ""; }}/></label><span className="help">Up to 4 MB / 50,000 rows per file.</span></div><div className="paste-import"><Field label="Or paste phone numbers"><textarea rows={6} value={pastePhones} onChange={e => setPastePhones(e.target.value)} placeholder="Paste up to 50,000 numbers — one per line or separated by commas"/><small className="help">Numbers are added to the audience list name above. Use international format; numbers with spaces or + are accepted.</small></Field><div className="form-actions"><button type="button" className="btn btn-primary" disabled={busy || !pastePhones.trim()} onClick={() => void importPastedPhones()}>{busy ? <LoaderCircle size={14} className="spin"/> : <Plus size={14}/>}Import pasted numbers</button></div></div></div>{groupForm && <form className="card form-card" onSubmit={createGroup}><h3>Create audience list</h3><div className="form-grid"><Field label="List name"><input name="name" required placeholder="Customers"/></Field><Field label="Description"><input name="description" placeholder="Optional note"/></Field></div><div className="member-picker"><b>Select contacts</b>{contacts.map(c => <label key={c.id}><input name="contactIds" type="checkbox" value={c.id}/><span>{c.name} · {c.phone}</span>{c.optedOut && <Pill tone="red">Opted out</Pill>}</label>)}</div><div className="form-actions"><button type="button" className="btn" onClick={() => setGroupForm(false)}>Cancel</button><button className="btn btn-primary" disabled={busy}>Save audience</button></div></form>}<div className="account-grid">{groups.map(g => <article className="card sender-card" key={g.id}><div className="sender-head"><div><h3>{g.name}</h3><small>{g.description || "Audience list"}</small></div><Pill tone="pink">{g._count.members} contacts</Pill></div><div className="sender-meta"><span>Eligible in list</span><b>{g.members?.filter(m => contacts.find(c => c.id === m.contactId)?.marketingOptIn && !contacts.find(c => c.id === m.contactId)?.optedOut).length ?? "—"}</b></div><div className="sender-actions"><button className="btn btn-small" onClick={() => { setSection("Create Campaign"); }}>Use in campaign<ChevronRight size={14}/></button><button className="icon-btn danger" onClick={() => void deleteGroup(g)} title="Delete audience"><Trash2 size={15}/></button></div></article>)}</div>{groups.length === 0 && <Empty icon={Users} title="No saved audience lists" detail="Create a list and choose its contacts."/>}<div className="card table-card"><div className="card-head"><div><h3>Contacts</h3><p>Only marketing opt-ins are eligible; STOP and other opt-out requests are enforced.</p></div><div className="contact-toolbar"><label className="contact-select-all"><input className="contact-select" type="checkbox" checked={allContactsSelected} onChange={toggleAllContacts} aria-label="Select all contacts"/>Select all</label><span className="help">{contacts.length} records</span>{selectedContactIds.length > 0 && <button className="btn btn-small contact-delete" onClick={() => void deleteSelectedContacts()}><Trash2 size={13}/>Delete selected ({selectedContactIds.length})</button>}</div></div><table className="table"><thead><tr><th aria-label="Select contact"></th><th>CONTACT</th><th>PHONE</th><th>GROUP</th><th>CONSENT</th><th>ACTION</th></tr></thead><tbody>{contacts.map(c => <tr key={c.id}><td><input className="contact-select" type="checkbox" checked={selectedContactIds.includes(c.id)} onChange={() => toggleContactSelection(c.id)} aria-label={`Select ${c.name || c.phone}`}/></td><td>{c.name}</td><td>{c.phone}</td><td>{c.groupName || "—"}</td><td><Pill tone={c.optedOut ? "red" : c.marketingOptIn ? "green" : "yellow"}>{c.optedOut ? "Opted out" : c.marketingOptIn ? "Opted in" : "No consent"}</Pill></td><td><div className="contact-row-actions"><button className="btn btn-small" onClick={() => void toggleOptOut(c)}>{c.optedOut ? "Confirm opt-in" : "Opt out"}</button><button className="btn btn-small contact-delete" onClick={() => void deleteContact(c)}><Trash2 size={12}/>Delete</button></div></td></tr>)}</tbody></table></div></>}
 

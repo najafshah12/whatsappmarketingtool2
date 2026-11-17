@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { phoneForWhatsAppApi, sendCloudMessage, WhatsAppApiError } from "@/lib/whatsapp";
+import { bridgeSend, renderBridgeMessage, BridgeApiError } from "@/lib/bridge";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 20;
@@ -33,6 +34,30 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     const input = schema.parse(await req.json());
     const account = await prisma.whatsAppAccount.findUnique({ where: { id } });
     if (!account) return NextResponse.json({ error: "Account not found." }, { status: 404 });
+
+    // QR (Baileys) sender: plain text, no Meta template and no 24-hour window.
+    if (account.provider === "bridge") {
+      if (account.status !== "connected" || !account.bridgeSessionId) {
+        return NextResponse.json({ error: "Connect this QR sender first: open Show QR and scan it from WhatsApp → Linked Devices." }, { status: 409 });
+      }
+      const to = phoneForWhatsAppApi(input.to);
+      if (to.length < 8) return NextResponse.json({ error: "Enter the full international number, for example +923001234567." }, { status: 400 });
+      const template = await prisma.template.findFirst({ where: { accountId: account.id }, orderBy: { createdAt: "desc" } });
+      const text = template
+        ? renderBridgeMessage(template.body, { name: "Test", phone: `+${to}`, email: "" })
+        : `Test message from ${account.name} via the WhatsApp bridge.`;
+      const result = await bridgeSend({ sessionId: account.bridgeSessionId, number: `+${to}`, message: text });
+      await prisma.auditLog.create({
+        data: { action: "whatsapp.account.test_message", entity: "whatsapp_account", entityId: account.id, detail: { to, provider: "bridge", sessionId: account.bridgeSessionId } },
+      });
+      return NextResponse.json({
+        ok: true,
+        provider: "bridge",
+        providerId: null,
+        message: `Test message sent from ${account.name} to +${to} through the WhatsApp bridge.`,
+      });
+    }
+
     if (account.status !== "connected" || !account.phoneNumberId) {
       return NextResponse.json({ error: "Connect this sender with Meta before sending a test message." }, { status: 409 });
     }
@@ -82,6 +107,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: error.issues[0]?.message || "Invalid test message." }, { status: 400 });
+    }
+    if (error instanceof BridgeApiError) {
+      return NextResponse.json({ error: error.message, code: error.status }, { status: 400 });
     }
     if (error instanceof WhatsAppApiError) {
       const hint = metaHint(error.graphCode);

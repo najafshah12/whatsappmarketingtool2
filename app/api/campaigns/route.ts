@@ -38,16 +38,24 @@ export async function POST(req: Request) {
     const [group, template, accounts] = await Promise.all([
       input.audienceGroupId ? prisma.audienceGroup.findUnique({ where: { id: input.audienceGroupId }, include: { members: { select: { contactId: true } } } }) : null,
       input.templateId ? prisma.template.findUnique({ where: { id: input.templateId } }) : null,
-      input.accountIds.length ? prisma.whatsAppAccount.findMany({ where: { id: { in: input.accountIds } }, select: { id: true, status: true, phoneNumberId: true, accessTokenEncrypted: true } }) : [],
+      input.accountIds.length ? prisma.whatsAppAccount.findMany({ where: { id: { in: input.accountIds } }, select: { id: true, status: true, provider: true, bridgeSessionId: true, phoneNumberId: true, accessTokenEncrypted: true } }) : [],
     ]);
     if (input.audienceGroupId && !group) return NextResponse.json({ error: "Audience list not found." }, { status: 404 });
     if (input.templateId && !template) return NextResponse.json({ error: "Template not found." }, { status: 404 });
     if (input.accountIds.length !== accounts.length) return NextResponse.json({ error: "One or more sender accounts were not found." }, { status: 400 });
     const selectedAccounts = input.accountIds.map(id => accounts.find(account => account.id === id)!);
-    if (input.rotationIntervalSeconds > 0 && selectedAccounts.filter(account => account.status === "connected" && account.phoneNumberId && account.accessTokenEncrypted).length < 2) return NextResponse.json({ error: "Sender rotation needs at least two connected WhatsApp numbers with valid tokens." }, { status: 409 });
+    const ready = (account: typeof selectedAccounts[number]) =>
+      account.status === "connected" && (account.provider === "bridge" ? Boolean(account.bridgeSessionId) : Boolean(account.phoneNumberId && account.accessTokenEncrypted));
+    const readyAccounts = selectedAccounts.filter(ready);
+    const allBridge = readyAccounts.length > 0 && readyAccounts.every(account => account.provider === "bridge");
+    if (input.rotationIntervalSeconds > 0 && readyAccounts.length < 2) return NextResponse.json({ error: "Sender rotation needs at least two connected WhatsApp numbers (Meta tokens or scanned QR senders)." }, { status: 409 });
     if (scheduledAt) {
-      if (!template || template.status !== "approved") return NextResponse.json({ error: "Scheduled campaigns need a Meta-approved template." }, { status: 409 });
-      if (!accounts.some(account => account.status === "connected" && account.phoneNumberId && account.id === template.accountId && account.accessTokenEncrypted)) return NextResponse.json({ error: "Assign the connected sender that owns this approved template." }, { status: 409 });
+      if (!template && !input.message.trim()) return NextResponse.json({ error: "Scheduled campaigns need a message or a template." }, { status: 409 });
+      if (template && template.status !== "approved" && !allBridge) return NextResponse.json({ error: "Scheduled campaigns need a Meta-approved template, or only QR (Baileys) senders." }, { status: 409 });
+      const ownerReady = template
+        ? readyAccounts.some(account => account.id === template.accountId)
+        : readyAccounts.length > 0;
+      if (!ownerReady) return NextResponse.json({ error: "Assign a connected sender to this scheduled campaign." }, { status: 409 });
     }
 
     const selectedIds = group ? group.members.map(member => member.contactId) : input.contactIds;

@@ -53,7 +53,7 @@ export async function GET(req: Request) {
       // The daily Hobby cron only runs once, so drain as many small batches
       // as the time budget allows instead of stopping after one batch.
       while (Date.now() < deadline) {
-        const result = await sendCampaignBatch(campaign.id, BATCH_SIZE);
+        const result = await sendCampaignBatch(campaign.id, BATCH_SIZE, { deadline });
         batches += 1;
         sent += result.sent;
         failed += result.failed;

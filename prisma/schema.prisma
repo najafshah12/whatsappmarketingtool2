@@ -82,6 +82,10 @@ model WhatsAppAccount {
   name                 String
   phone                String            @unique
   status               String            @default("disconnected")
+  /** "meta" = WhatsApp Cloud API token, "bridge" = self-hosted Baileys QR sender. */
+  provider             String            @default("meta")
+  /** Session name on the bridge, for example account1. */
+  bridgeSessionId      String?           @unique
   phoneNumberId        String?
   businessAccountId    String?
   metaBusinessId       String?
