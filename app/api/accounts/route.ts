@@ -36,8 +36,10 @@ export async function POST(req: Request) {
       if (!data.bridgeSessionId) {
         return NextResponse.json({ error: "A QR sender needs a session name, for example account1." }, { status: 400 });
       }
+      // Never block on configuration: the watchdog links the tunnel within a
+      // few minutes, and the QR panel reports the real bridge error meanwhile.
       if (!(await bridgeConfig()).configured) {
-        return NextResponse.json({ error: "The QR bridge is not linked to this deployment yet. Start the stack on the PC (Start WhatsApp CRM.bat) — it registers the tunnel automatically — then reload this page." }, { status: 503 });
+        console.warn("QR sender created while the bridge URL/key was not resolvable; the QR poll will report it.");
       }
     }
     const account = await prisma.whatsAppAccount.create({

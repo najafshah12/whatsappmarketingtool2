@@ -106,7 +106,7 @@ export function bridgeMinDelayMs() {
 async function bridgeRequest<T>(path: string, init: RequestInit = {}, timeoutMs = 25000): Promise<T> {
   const { base, key, configured } = await bridgeConfig();
   if (!configured) {
-    throw new BridgeApiError("WhatsApp bridge is not configured. Set WA_BRIDGE_URL and WA_BRIDGE_API_KEY on the server.", 503);
+    throw new BridgeApiError("The QR bridge is offline. Double-click \"Start WhatsApp CRM.bat\" on the PC that runs it, then tap New QR.", 503);
   }
   const url = new URL(`${base}${path.startsWith("/") ? path : `/${path}`}`);
   url.searchParams.set("apiKey", key);
@@ -170,7 +170,7 @@ export function bridgeQr(sessionId: string) {
  */
 export async function bridgeStartSession(sessionId: string) {
   const { base, key, configured } = await bridgeConfig();
-  if (!configured) throw new BridgeApiError("WhatsApp bridge is not configured. Set WA_BRIDGE_URL and WA_BRIDGE_API_KEY on the server.", 503);
+  if (!configured) throw new BridgeApiError("The QR bridge is offline. Double-click \"Start WhatsApp CRM.bat\" on the PC that runs it, then tap New QR.", 503);
   const url = new URL(`${base}/session/add/${encodeURIComponent(sessionId)}`);
   url.searchParams.set("apiKey", key);
   try {
