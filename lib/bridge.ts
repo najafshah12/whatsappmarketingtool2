@@ -157,10 +157,25 @@ export function bridgeSend(input: { sessionId: string; number: string; message: 
 }
 
 export function bridgeQr(sessionId: string) {
-  return bridgeRequest<{ status: string; qr: string | null; phone?: string | null }>(
+  return bridgeRequest<{ status: string; qr: string | null; phone?: string | null; qrAgeMs?: number | null }>(
     `/session/qr/${encodeURIComponent(sessionId)}`,
     {},
     15000
+  );
+}
+
+/**
+ * Asks the bridge for a brand new QR by recycling the session socket.
+ *
+ * The code WhatsApp shows expires in about 20 seconds. When the socket stalls
+ * the bridge keeps serving the last image, so the phone reports a dead code —
+ * exactly the "QR not working" case. Recycling fixes it in one call.
+ */
+export async function bridgeRestartSession(sessionId: string) {
+  await bridgeRequest<{ status: boolean; message?: string }>(
+    `/session/restart/${encodeURIComponent(sessionId)}`,
+    { method: "POST" },
+    25000
   );
 }
 

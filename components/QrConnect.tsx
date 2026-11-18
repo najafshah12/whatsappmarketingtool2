@@ -152,7 +152,25 @@ export default function QrConnect({ account, takenSessions, onSaved, onConnected
     }
   };
 
-  const refreshNow = useCallback(() => { setError(""); setState(null); setRetry(value => value + 1); }, []);
+  // "New QR" recycles the bridge socket: a stalled session keeps serving an
+  // expired image, which the phone rejects as an invalid code.
+  const [refreshing, setRefreshing] = useState(false);
+  const newQr = useCallback(async () => {
+    if (!sender || refreshing) return;
+    setRefreshing(true);
+    setError("");
+    try {
+      const response = await fetch(`/api/accounts/${sender.id}/qr`, { method: "POST", cache: "no-store" });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || "Could not refresh the QR code.");
+      setState(body as QrPayload);
+      setRetry(value => value + 1);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not refresh the QR code.");
+    } finally {
+      setRefreshing(false);
+    }
+  }, [sender, refreshing]);
 
   // Keep the dialog open and jump straight to the next number's form.
   const addAnother = () => {
@@ -245,7 +263,9 @@ export default function QrConnect({ account, takenSessions, onSaved, onConnected
                 <div className="qr-alert">
                   <AlertTriangle size={15} />
                   <span>{error}</span>
-                  <button type="button" className="btn btn-small" onClick={refreshNow}><RefreshCw size={13} />Retry</button>
+                  <button type="button" className="btn btn-small" onClick={() => void newQr()} disabled={refreshing}>
+                    <RefreshCw size={13} />Retry
+                  </button>
                 </div>
               )}
             </div>
@@ -284,7 +304,10 @@ export default function QrConnect({ account, takenSessions, onSaved, onConnected
                   </>
                 ) : (
                   <>
-                    <button type="button" className="btn" onClick={refreshNow}><RefreshCw size={14} />New QR</button>
+                    <button type="button" className="btn" onClick={() => void newQr()} disabled={refreshing}>
+                      {refreshing ? <LoaderCircle size={14} className="spin" /> : <RefreshCw size={14} />}
+                      {refreshing ? "New code…" : "New QR"}
+                    </button>
                     <button type="button" className="btn btn-primary" onClick={onClose}>Close</button>
                   </>
                 )}

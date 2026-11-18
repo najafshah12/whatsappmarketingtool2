@@ -411,6 +411,18 @@ html,body{
   .msg-form{padding:16px}
 }
 
+/* ---------- bridge offline banner ---------- */
+.bridge-offline{
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  padding:11px 14px;border-radius:14px;
+  border:1px solid #f3d5cf;background:#fff7f5;color:#a3412f;
+  font-size:10.5px;line-height:1.5;
+}
+.bridge-offline svg{flex:none}
+.bridge-offline span{flex:1 1 260px}
+.bridge-offline b{font-weight:750}
+.bridge-offline .btn{flex:none;background:#fff;border-color:#f0cfc8;color:#a3412f}
+
 /* ---------- add-another-account tile ---------- */
 .add-account-tile{
   display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;

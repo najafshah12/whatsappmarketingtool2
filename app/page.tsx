@@ -70,20 +70,22 @@ export default function Home() {
   useEffect(() => { void refresh(); }, [refresh]);
   useEffect(() => { setOrigin(window.location.origin); }, []);
   // Bridge/tunnel health, so a dropped quick tunnel is visible before a scan fails.
-  useEffect(() => {
-    let cancelled = false;
-    const check = async () => {
-      try {
-        const body = await fetch("/api/health", { cache: "no-store" }).then(response => response.json());
-        if (!cancelled) setBridgeHealth(body?.checks?.bridgeReachable === "yes" ? "online" : "offline");
-      } catch {
-        if (!cancelled) setBridgeHealth("offline");
-      }
-    };
-    void check();
-    const id = setInterval(() => void check(), 60000);
-    return () => { cancelled = true; clearInterval(id); };
+  const checkBridge = useCallback(async () => {
+    try {
+      const body = await fetch("/api/health", { cache: "no-store" }).then(response => response.json());
+      const online = body?.checks?.bridgeReachable === "yes";
+      setBridgeHealth(online ? "online" : "offline");
+      return online;
+    } catch {
+      setBridgeHealth("offline");
+      return false;
+    }
   }, []);
+  useEffect(() => {
+    void checkBridge();
+    const id = setInterval(() => void checkBridge(), 30000);
+    return () => clearInterval(id);
+  }, [checkBridge]);
   useEffect(() => { if (!toast) return; const id = setTimeout(() => setToast(""), Math.min(10000, Math.max(3000, toast.length * 55))); return () => clearTimeout(id); }, [toast]);
 
   const filteredConversations = useMemo(() => conversations.filter(x => `${x.contact.name} ${x.contact.phone} ${x.messages[0]?.body ?? ""}`.toLowerCase().includes(search.toLowerCase())), [conversations, search]);
@@ -304,6 +306,15 @@ export default function Home() {
 
       {section === "Campaign Reports" && <><div className="page-head"><div><h2>Campaign Reports</h2><p>Download a recipient-by-recipient PDF with delivery, pending, skipped, and failure details.</p></div></div><div className="card table-card"><table className="table"><thead><tr><th>CAMPAIGN</th><th>STATUS</th><th>SUCCESS RATE</th><th>DELIVERED / READ</th><th>FAILED</th><th>RECIPIENTS</th><th>REPORT</th></tr></thead><tbody>{campaigns.map(c => { const success = c.total ? Math.round((c.delivered / c.total) * 100) : 0; return <tr key={c.id}><td><b>{c.name}</b><small>{date(c.createdAt)}</small></td><td><Pill>{c.status}</Pill></td><td>{success}%</td><td>{c.delivered.toLocaleString()}</td><td className="error-text">{c.failed.toLocaleString()}</td><td>{c.total.toLocaleString()}</td><td><a className="btn btn-small" href={`/api/campaigns/${c.id}/report`}><FileText size={14}/>Download PDF</a></td></tr>; })}</tbody></table>{campaigns.length === 0 && <div className="empty"><FileText size={20}/><b>No campaign reports yet</b><small>Create a campaign to generate its report.</small></div>}</div></>}
       {section === "Accounts" && <div className="accounts-page"><div className="page-head accounts-head"><div><span className="account-eyebrow">CHANNEL SETUP</span><h2>WhatsApp Business Accounts</h2><p>Connect Meta senders with a 60-day token or Embedded Signup, or add QR (Baileys) senders that need no Meta approval.</p></div><div className="accounts-head-actions"><Pill tone={bridgeHealth === "online" ? "green" : bridgeHealth === "checking" ? "" : "red"}><span title="Self-hosted WhatsApp bridge reachable from Vercel">QR bridge {bridgeHealth}</span></Pill><button className="btn btn-primary" onClick={() => { openQr(); setTokenForm(false); }} title="Add another WhatsApp number with a QR scan — no Meta approval needed"><Plus size={15}/>Add account</button><button className="btn" onClick={() => { setTokenMode("connect"); setTokenAccountId(""); setTokenAccountName(""); setTokenPhoneId(""); setTokenWabaId(""); setTokenForm(!tokenForm); }}><KeyRound size={15}/>{tokenForm && tokenMode === "connect" ? "Close Token Form" : "Connect with Token (60 Days)"}</button><button className="btn" disabled={busy || !metaSdkReady} onClick={startMetaSignup}><Plus size={15}/>{metaSdkReady ? "Connect with Meta Popup" : "Loading Meta popup…"}</button></div></div>
+      {bridgeHealth === "offline" && (
+        <div className="bridge-offline">
+          <AlertTriangle size={15} />
+          <span>
+            <b>QR bridge offline.</b> QR numbers send through the PC that runs WhatsApp CRM — that PC must stay on and connected.
+          </span>
+          <button className="btn btn-small" onClick={() => void checkBridge()}><RefreshCw size={13} />Retry</button>
+        </div>
+      )}
       <div className="account-overview"><div className="account-stat"><span className="account-stat-icon"><Phone size={17}/></span><div><small>Connected numbers</small><b>{accounts.filter(a => a.status === "connected").length}</b></div></div><div className="account-stat"><span className="account-stat-icon"><ShieldCheck size={17}/></span><div><small>Ready to send</small><b>{accounts.filter(a => a.status === "connected" && (!a.tokenExpiresAt || new Date(a.tokenExpiresAt).getTime() > Date.now())).length}</b></div></div><div className="account-stat"><span className="account-stat-icon"><Activity size={17}/></span><div><small>Need attention</small><b>{accounts.filter(a => a.status !== "connected").length}</b></div></div></div>
       {tokenForm && (
         <form className="card form-card account-token-form" onSubmit={handleTokenSubmit}>
@@ -383,7 +394,7 @@ export default function Home() {
                 <small>{isBridge ? `${a.phone} · QR session ${a.bridgeSessionId}` : `${a.phone} ${a.phoneNumberId ? `· ID: ${a.phoneNumberId}` : ""}`}</small>
               </div>
               <div className="sender-head-right">
-                <Pill tone={a.status === "connected" ? (expired ? "red" : "green") : a.status === "expired" ? "red" : "yellow"}>{isBridge ? (a.status === "connected" ? "qr connected" : "scan needed") : expired ? "token expired" : a.status}</Pill>
+                <Pill tone={isBridge ? (bridgeHealth === "offline" ? "red" : a.status === "connected" ? "green" : "yellow") : a.status === "connected" ? (expired ? "red" : "green") : a.status === "expired" ? "red" : "yellow"}>{isBridge ? (bridgeHealth === "offline" ? "bridge offline" : a.status === "connected" ? "qr connected" : "scan needed") : expired ? "token expired" : a.status}</Pill>
                 <button className="icon-btn danger" onClick={() => void deleteAccount(a)} title="Remove account"><Trash2 size={14}/></button>
               </div>
             </div>
@@ -394,7 +405,12 @@ export default function Home() {
             {tokenBadge}
             <div className="sender-actions">
               {a.status === "connected" && (
-                <button className="btn btn-small btn-primary sender-send" onClick={() => setMessageModal(a)} title={`Write and send a message from ${a.name}`}>
+                <button
+                  className="btn btn-small btn-primary sender-send"
+                  onClick={() => setMessageModal(a)}
+                  disabled={isBridge && bridgeHealth === "offline"}
+                  title={isBridge && bridgeHealth === "offline" ? "Turn on the PC that runs the bridge to send from this QR number" : `Write and send a message from ${a.name}`}
+                >
                   <MessageSquare size={13}/>Send message
                 </button>
               )}
